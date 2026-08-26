@@ -1,4 +1,5 @@
 import { apiClient } from '@/lib/api/client'
+import { getSession } from '@/lib/auth/session-storage'
 import type { AuthTokens, LoginRequest, LoginResponse, RegisterRequest, User } from '@/types/auth'
 
 export interface AuthService {
@@ -23,6 +24,8 @@ const mockUser = (email: string): User => ({
   created_at: new Date().toISOString(),
 })
 
+let registeredMockUser: User | null = null
+
 export const mockAuthService: AuthService = {
   async login({ email, password }) {
     await wait(450)
@@ -32,13 +35,18 @@ export const mockAuthService: AuthService = {
       access_token: 'mock-access-token',
       refresh_token: 'mock-refresh-token',
       token_type: 'bearer',
-      user: mockUser(email),
+      user: registeredMockUser?.email === email ? registeredMockUser : mockUser(email),
     }
   },
 
   async register(details) {
     await wait(450)
-    return { ...mockUser(details.email), full_name: details.full_name, role: details.role }
+    registeredMockUser = {
+      ...mockUser(details.email),
+      full_name: details.full_name,
+      role: details.role,
+    }
+    return registeredMockUser
   },
 
   async refresh() {
@@ -52,7 +60,9 @@ export const mockAuthService: AuthService = {
 
   async getCurrentUser() {
     await wait(250)
-    return mockUser('student@ntu.edu.sg')
+    const user = getSession()?.user
+    if (!user) throw new Error('Your session has expired. Please sign in again.')
+    return user
   },
 }
 

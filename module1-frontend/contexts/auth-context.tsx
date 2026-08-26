@@ -2,21 +2,21 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { authService } from '@/lib/api/auth-service'
-import type { LoginRequest, User } from '@/types/auth'
-
-const SESSION_KEY = 'saiv.auth.session'
-
-interface StoredSession {
-  accessToken: string
-  refreshToken: string
-  user: User
-}
+import {
+  clearSession as clearStoredSession,
+  getSession,
+  setSession as setStoredSession,
+  StoredSession,
+  subscribeToSessionChanges,
+} from '@/lib/auth/session-storage'
+import type { LoginRequest, RegisterRequest, User } from '@/types/auth'
 
 interface AuthContextValue {
   user: User | null
   accessToken: string | null
   isLoading: boolean
   login(credentials: LoginRequest): Promise<void>
+  register(details: RegisterRequest): Promise<void>
   logout(): void
 }
 
@@ -26,43 +26,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<StoredSession | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
+  useEffect(() => subscribeToSessionChanges(() => setSession(getSession())), [])
+
   useEffect(() => {
-    try {
-      const stored = window.sessionStorage.getItem(SESSION_KEY)
-      if (stored) setSession(JSON.parse(stored) as StoredSession)
-    } catch {
-      window.sessionStorage.removeItem(SESSION_KEY)
-    } finally {
-      setIsLoading(false)
+    let active = true
+
+    const restore = async () => {
+      const stored = getSession()
+      if (!stored) {
+        if (active) setIsLoading(false)
+        return
+      }
+
+      if (active) setSession(stored)
+      try {
+        const user = await authService.getCurrentUser(stored.accessToken)
+        if (active) setStoredSession({ ...stored, user })
+      } catch {
+        clearStoredSession()
+      } finally {
+        if (active) setIsLoading(false)
+      }
     }
+
+    void restore()
+    return () => { active = false }
   }, [])
 
   const login = useCallback(async (credentials: LoginRequest) => {
     const response = await authService.login(credentials)
-    const nextSession: StoredSession = {
-      accessToken: response.access_token,
-      refreshToken: response.refresh_token,
-      user: response.user,
-    }
-    window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(nextSession))
-    setSession(nextSession)
+    setStoredSession({ accessToken: response.access_token, refreshToken: response.refresh_token, user: response.user })
   }, [])
 
-  const logout = useCallback(() => {
-    window.sessionStorage.removeItem(SESSION_KEY)
-    setSession(null)
-  }, [])
+  const register = useCallback(async (details: RegisterRequest) => {
+    await authService.register(details)
+    await login({ email: details.email, password: details.password })
+  }, [login])
 
-  const value = useMemo<AuthContextValue>(
-    () => ({
-      user: session?.user ?? null,
-      accessToken: session?.accessToken ?? null,
-      isLoading,
-      login,
-      logout,
-    }),
-    [isLoading, login, logout, session],
-  )
+  const logout = useCallback(() => clearStoredSession(), [])
+
+  const value = useMemo<AuthContextValue>(() => ({
+    user: session?.user ?? null,
+    accessToken: session?.accessToken ?? null,
+    isLoading,
+    login,
+    register,
+    logout,
+  }), [isLoading, login, logout, register, session])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

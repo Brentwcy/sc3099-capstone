@@ -55,9 +55,10 @@ export function AppHeader() {
             </button>
           </div>
         ) : (
-          <Link className="button-primary" href="/login">
-            Student login
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link className="button-secondary" href="/register">Register</Link>
+            <Link className="button-primary" href="/login">Student login</Link>
+          </div>
         )}
       </div>
     </header>

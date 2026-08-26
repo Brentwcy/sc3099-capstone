@@ -40,7 +40,7 @@ export default function LoginPage() {
             Sign in to view active sessions and begin a secure attendance check-in.
           </p>
           <div className="mt-8 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-            <p className="font-semibold">Week 2 mock mode is active</p>
+            <p className="font-semibold">Mock mode is active</p>
             <p className="mt-1">The pre-filled credentials demonstrate the typed authentication flow.</p>
           </div>
         </section>
@@ -86,8 +86,8 @@ export default function LoginPage() {
           </button>
 
           <p className="mt-5 text-center text-sm text-slate-600">
-            Registration will be completed in Week 3.{' '}
-            <Link className="font-semibold text-blue-700 hover:text-blue-900" href="/">Return home</Link>
+            Need an account?{' '}
+            <Link className="font-semibold text-blue-700 hover:text-blue-900" href="/register">Register</Link>
           </p>
         </form>
       </div>

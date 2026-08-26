@@ -1,5 +1,6 @@
-import axios, { AxiosError } from 'axios'
-import type { ApiErrorBody } from '@/types/auth'
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
+import { clearSession, getSession, setSession } from '@/lib/auth/session-storage'
+import type { ApiErrorBody, AuthTokens } from '@/types/auth'
 
 const backendUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -8,6 +9,56 @@ export const apiClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
   timeout: 15_000,
 })
+
+interface RetryableRequest extends InternalAxiosRequestConfig {
+  _authRetry?: boolean
+}
+
+let refreshRequest: Promise<AuthTokens> | null = null
+
+apiClient.interceptors.request.use((config) => {
+  const accessToken = getSession()?.accessToken
+  if (accessToken) config.headers.Authorization = `Bearer ${accessToken}`
+  return config
+})
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const request = error.config as RetryableRequest | undefined
+    const session = getSession()
+    const isAuthRequest = request?.url?.startsWith('/auth/') ?? false
+
+    if (error.response?.status !== 401 || !request || request._authRetry || isAuthRequest || !session) {
+      return Promise.reject(error)
+    }
+
+    request._authRetry = true
+
+    try {
+      refreshRequest ??= axios
+        .post<AuthTokens>(`${apiClient.defaults.baseURL}/auth/refresh`, {
+          refresh_token: session.refreshToken,
+        })
+        .then(({ data }) => data)
+        .finally(() => {
+          refreshRequest = null
+        })
+
+      const tokens = await refreshRequest
+      setSession({
+        ...session,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+      })
+      request.headers.Authorization = `Bearer ${tokens.access_token}`
+      return apiClient(request)
+    } catch (refreshError) {
+      clearSession()
+      return Promise.reject(refreshError)
+    }
+  },
+)
 
 export function getApiErrorMessage(error: unknown): string {
   if (!axios.isAxiosError<ApiErrorBody>(error)) {
