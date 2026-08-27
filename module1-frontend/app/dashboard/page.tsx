@@ -18,6 +18,10 @@ export default function DashboardPage() {
     return <AppShell><p className="py-20 text-center text-slate-600">Loading your dashboard…</p></AppShell>
   }
 
+  const consentComplete = Boolean(user.camera_consent && user.geolocation_consent)
+  const setupComplete = consentComplete && Boolean(user.face_enrolled)
+  const setupHref = consentComplete ? '/onboarding/face-enrollment' : '/onboarding/consent'
+
   return (
     <AppShell>
       <section className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
@@ -29,19 +33,15 @@ export default function DashboardPage() {
         <span className="w-fit rounded-full bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-800">Signed in</span>
       </section>
 
-      <section className="mt-8 grid gap-4 md:grid-cols-3">
-        {[
-          ['Active sessions', 'Session discovery and selection will be implemented in Week 5.', '/check-in'],
-          ['Consent status', 'Camera and geolocation consent will be implemented in Week 4.', '/consent'],
-          ['Attendance history', 'Student check-in history follows the core integration.', '/history'],
-        ].map(([title, description, href]) => (
-          <article key={title} className="card flex flex-col">
-            <h2 className="font-semibold text-slate-950">{title}</h2>
-            <p className="mt-2 flex-1 text-sm leading-6 text-slate-600">{description}</p>
-            <Link className="mt-6 text-sm font-semibold text-blue-700 hover:text-blue-900" href={href}>View area →</Link>
-          </article>
-        ))}
-      </section>
+      {!setupComplete && (
+        <section className="mt-8 flex flex-col justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50 p-6 sm:flex-row sm:items-center">
+          <div>
+            <h2 className="font-semibold text-amber-950">Complete your account setup</h2>
+            <p className="mt-2 text-sm leading-6 text-amber-900">{consentComplete ? 'Your consent is saved. Face enrollment is still required before attendance check-in.' : 'Review camera and location consent before enrolling your face and checking in.'}</p>
+          </div>
+          <Link className="button-primary shrink-0" href={setupHref}>Continue setup</Link>
+        </section>
+      )}
 
       <section className="card mt-8">
         <h2 className="text-lg font-semibold text-slate-950">Authenticated profile</h2>
@@ -51,6 +51,24 @@ export default function DashboardPage() {
           <div><dt className="text-slate-500">Account</dt><dd className="mt-1 font-medium text-slate-950">{user.is_active ? 'Active' : 'Inactive'}</dd></div>
         </dl>
       </section>
+
+      <Link className="card mt-8 block transition hover:border-blue-300 hover:shadow-md" href="/sessions" aria-label="Open active sessions">
+        <div className="flex items-center gap-2 text-blue-700">
+          <h2 className="text-lg font-semibold underline decoration-2 underline-offset-4">Active sessions</h2>
+          <span className="text-blue-700" aria-hidden="true">→</span>
+        </div>
+        <p className="mt-5 text-sm text-slate-500">Currently available</p>
+        <p className="mt-1 font-medium text-slate-950">Nil</p>
+      </Link>
+
+      <Link className="card mt-8 block transition hover:border-blue-300 hover:shadow-md" href="/history" aria-label="Open attendance history">
+        <div className="flex items-center gap-2 text-blue-700">
+          <h2 className="text-lg font-semibold underline decoration-2 underline-offset-4">Attendance history</h2>
+          <span className="text-blue-700" aria-hidden="true">→</span>
+        </div>
+        <p className="mt-5 text-sm text-slate-500">Recent records</p>
+        <p className="mt-1 font-medium text-slate-950">Nil</p>
+      </Link>
     </AppShell>
   )
 }

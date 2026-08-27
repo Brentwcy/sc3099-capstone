@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { authService } from '@/lib/api/auth-service'
+import { userService } from '@/lib/api/user-service'
 import {
   clearSession as clearStoredSession,
   getSession,
@@ -10,6 +11,8 @@ import {
   subscribeToSessionChanges,
 } from '@/lib/auth/session-storage'
 import type { LoginRequest, RegisterRequest, User } from '@/types/auth'
+import type { UpdateConsentRequest } from '@/types/consent'
+import type { ChangePasswordRequest, ChangePasswordResponse, UpdateProfileRequest } from '@/types/settings'
 
 interface AuthContextValue {
   user: User | null
@@ -17,6 +20,9 @@ interface AuthContextValue {
   isLoading: boolean
   login(credentials: LoginRequest): Promise<void>
   register(details: RegisterRequest): Promise<void>
+  updateConsent(consent: UpdateConsentRequest): Promise<void>
+  updateProfile(profile: UpdateProfileRequest): Promise<void>
+  changePassword(passwords: ChangePasswordRequest): Promise<ChangePasswordResponse>
   logout(): void
 }
 
@@ -65,14 +71,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => clearStoredSession(), [])
 
+  const updateConsent = useCallback(async (consent: UpdateConsentRequest) => {
+    const currentSession = getSession()
+    if (!currentSession) throw new Error('Your session has expired. Please sign in again.')
+    const user = await userService.updateConsent(consent)
+    setStoredSession({ ...currentSession, user })
+  }, [])
+
+  const updateProfile = useCallback(async (profile: UpdateProfileRequest) => {
+    const currentSession = getSession()
+    if (!currentSession) throw new Error('Your session has expired. Please sign in again.')
+    const user = await userService.updateProfile(profile)
+    setStoredSession({ ...currentSession, user })
+  }, [])
+
+  const changePassword = useCallback(
+    async (passwords: ChangePasswordRequest) => userService.changePassword(passwords),
+    [],
+  )
+
   const value = useMemo<AuthContextValue>(() => ({
     user: session?.user ?? null,
     accessToken: session?.accessToken ?? null,
     isLoading,
     login,
     register,
+    updateConsent,
+    updateProfile,
+    changePassword,
     logout,
-  }), [isLoading, login, logout, register, session])
+  }), [changePassword, isLoading, login, logout, register, session, updateConsent, updateProfile])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

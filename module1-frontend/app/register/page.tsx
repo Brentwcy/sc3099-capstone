@@ -51,7 +51,7 @@ export default function RegisterPage() {
     setIsSubmitting(true)
     try {
       await register({ full_name: normalizedName, email: normalizedEmail, password, role: 'student' })
-      router.push('/dashboard')
+      router.push('/onboarding/consent')
     } catch (registrationError) {
       setError(getApiErrorMessage(registrationError))
     } finally {

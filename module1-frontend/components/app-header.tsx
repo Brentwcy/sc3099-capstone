@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/auth-context'
 
 const links = [
   { href: '/dashboard', label: 'Dashboard' },
-  { href: '/check-in', label: 'Check in' },
+  { href: '/sessions', label: 'Sessions' },
   { href: '/history', label: 'History' },
 ]
 
@@ -50,9 +50,21 @@ export function AppHeader() {
                 </Link>
               ))}
             </nav>
-            <button className="button-secondary" type="button" onClick={handleLogout}>
-              Log out
-            </button>
+            <div className="flex items-center gap-2 sm:ml-2 sm:border-l sm:border-slate-200 sm:pl-4">
+              <Link
+                href="/settings"
+                className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  pathname === '/settings'
+                    ? 'bg-blue-50 text-blue-800'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
+                }`}
+              >
+                Settings
+              </Link>
+              <button className="button-secondary" type="button" onClick={handleLogout}>
+                Log out
+              </button>
+            </div>
           </div>
         ) : (
           <div className="flex items-center gap-2">
