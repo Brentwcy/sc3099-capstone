@@ -1,17 +1,5 @@
 """Mock Week 1 data shaped like the documented backend contracts."""
 
-PAGE_NAMES = (
-    "Overview",
-    "My Attendance",
-    "Sessions",
-    "Check-ins",
-    "Flagged Review",
-    "Analytics",
-    "Exports",
-    "Audit Logs",
-    "System Metrics",
-)
-
 MOCK_USERS = {
     "student": {
         "id": "11111111-1111-4111-8111-111111111111",

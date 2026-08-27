@@ -15,8 +15,8 @@ def render_overview(current_user: dict[str, Any]) -> None:
     """Render the Week 1 overview using only mock dashboard data."""
     st.title("SAIV Dashboard")
     st.caption(
-        f"Mock user: {current_user['full_name']} ({current_user['role']}) — "
-        "authentication and RBAC are not enabled."
+        f"Signed in as {current_user['full_name']} ({current_user['role']}). "
+        "Navigation is filtered for this authenticated role."
     )
 
     metric_columns = st.columns(4)
