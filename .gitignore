@@ -3,6 +3,13 @@ __MACOSX/
 node_modules/
 .next/
 .venv/
+venv/
+env/
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 .env
