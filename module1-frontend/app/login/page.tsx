@@ -4,8 +4,11 @@ import Link from 'next/link'
 import { FormEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/app-shell'
+import { GuestOnlyRoute } from '@/components/guest-only-route'
+import { PasswordInput } from '@/components/password-input'
 import { useAuth } from '@/contexts/auth-context'
 import { getApiErrorMessage } from '@/lib/api/client'
+import { getPasswordError, isValidEmail, normalizeEmail } from '@/lib/auth/validation'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -18,10 +21,26 @@ export default function LoginPage() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError('')
+
+    const normalizedEmail = normalizeEmail(email)
+    if (!normalizedEmail) {
+      setError('Email address is required.')
+      return
+    }
+    if (!isValidEmail(normalizedEmail)) {
+      setError('Enter a valid email address.')
+      return
+    }
+    const passwordError = getPasswordError(password)
+    if (passwordError) {
+      setError(passwordError)
+      return
+    }
+
     setIsSubmitting(true)
 
     try {
-      await login({ email, password })
+      await login({ email: normalizedEmail, password })
       router.push('/dashboard')
     } catch (loginError) {
       setError(getApiErrorMessage(loginError))
@@ -31,7 +50,8 @@ export default function LoginPage() {
   }
 
   return (
-    <AppShell>
+    <GuestOnlyRoute>
+      <AppShell>
       <div className="mx-auto grid max-w-4xl gap-8 py-8 lg:grid-cols-2 lg:items-center">
         <section>
           <p className="eyebrow">Student access</p>
@@ -62,11 +82,10 @@ export default function LoginPage() {
 
           <div className="mt-5">
             <label className="form-label" htmlFor="password">Password</label>
-            <input
+            <PasswordInput
               className="form-input"
               id="password"
               name="password"
-              type="password"
               autoComplete="current-password"
               minLength={8}
               required
@@ -85,12 +104,17 @@ export default function LoginPage() {
             {isSubmitting ? 'Signing in…' : 'Sign in'}
           </button>
 
+          <p className="mt-4 text-center text-sm">
+            <Link className="font-semibold text-blue-700 hover:text-blue-900" href="/forgot-password">Forgot password?</Link>
+          </p>
+
           <p className="mt-5 text-center text-sm text-slate-600">
             Need an account?{' '}
             <Link className="font-semibold text-blue-700 hover:text-blue-900" href="/register">Register</Link>
           </p>
         </form>
       </div>
-    </AppShell>
+      </AppShell>
+    </GuestOnlyRoute>
   )
 }

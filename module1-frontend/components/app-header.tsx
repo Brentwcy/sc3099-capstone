@@ -13,7 +13,7 @@ const links = [
 export function AppHeader() {
   const pathname = usePathname()
   const router = useRouter()
-  const { user, logout } = useAuth()
+  const { user, isLoading, logout } = useAuth()
 
   const handleLogout = () => {
     logout()
@@ -33,7 +33,12 @@ export function AppHeader() {
           </span>
         </Link>
 
-        {user ? (
+        {isLoading ? (
+          <div className="flex gap-2" role="status" aria-label="Checking session">
+            <span className="h-11 w-20 animate-pulse rounded-lg bg-slate-200" />
+            <span className="h-11 w-32 animate-pulse rounded-lg bg-slate-200" />
+          </div>
+        ) : user ? (
           <div className="flex flex-wrap items-center justify-end gap-2">
             <nav className="flex items-center gap-1" aria-label="Main navigation">
               {links.map((link) => (
@@ -68,8 +73,8 @@ export function AppHeader() {
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <Link className="button-secondary" href="/register">Register</Link>
-            <Link className="button-primary" href="/login">Student login</Link>
+            <Link className="button-primary" href="/login">Login</Link>
+            <Link className="button-secondary" href="/register">Create account</Link>
           </div>
         )}
       </div>

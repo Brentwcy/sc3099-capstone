@@ -7,6 +7,7 @@ export interface AuthService {
   register(details: RegisterRequest): Promise<User>
   refresh(refreshToken: string): Promise<AuthTokens>
   getCurrentUser(accessToken: string): Promise<User>
+  requestPasswordReset(email: string): Promise<void>
 }
 
 const wait = (milliseconds: number) =>
@@ -64,6 +65,9 @@ export const mockAuthService: AuthService = {
     if (!user) throw new Error('Your session has expired. Please sign in again.')
     return user
   },
+  async requestPasswordReset() {
+    await wait(400)
+  },
 }
 
 export const httpAuthService: AuthService = {
@@ -89,6 +93,9 @@ export const httpAuthService: AuthService = {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
     return data
+  },
+  async requestPasswordReset(email) {
+    await apiClient.post('/auth/forgot-password', { email })
   },
 }
 

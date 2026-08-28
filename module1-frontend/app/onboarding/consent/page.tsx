@@ -20,6 +20,7 @@ export default function OnboardingConsentPage() {
             <p className="eyebrow">Account setup</p>
             <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Review privacy and consent</h1>
             <p className="mt-3 leading-7 text-slate-600">SAIV needs account-level consent before it can process camera or location evidence. This step does not open your camera or request your location.</p>
+            <p className="mt-2 text-sm leading-6 text-slate-500">You may finish setup later and keep using your account. Attendance check-in remains unavailable until both consent options are enabled.</p>
           </section>
 
           <section className="card mt-8 border-blue-200 bg-blue-50">

@@ -6,8 +6,11 @@ import { AppShell } from '@/components/app-shell'
 import { ConsentControls } from '@/components/consent/consent-controls'
 import { DeviceDiagnostics } from '@/components/consent/device-diagnostics'
 import { ProtectedRoute } from '@/components/protected-route'
+import { PasswordInput } from '@/components/password-input'
+import { PasswordRequirements } from '@/components/password-requirements'
 import { useAuth } from '@/contexts/auth-context'
 import { getApiErrorMessage } from '@/lib/api/client'
+import { getPasswordError } from '@/lib/auth/validation'
 
 type FormMessage = { text: string; type: 'success' | 'error' }
 
@@ -53,12 +56,9 @@ export default function SettingsPage() {
       setPasswordMessage({ text: 'Current password is required.', type: 'error' })
       return
     }
-    if (!newPassword) {
-      setPasswordMessage({ text: 'New password is required.', type: 'error' })
-      return
-    }
-    if (newPassword.length < 8) {
-      setPasswordMessage({ text: 'New password must contain at least 8 characters.', type: 'error' })
+    const newPasswordError = getPasswordError(newPassword, 'New password')
+    if (newPasswordError) {
+      setPasswordMessage({ text: newPasswordError, type: 'error' })
       return
     }
     if (newPassword === currentPassword) {
@@ -129,12 +129,12 @@ export default function SettingsPage() {
           {isChangingPassword && (
             <form className="mt-6 max-w-xl" onSubmit={savePassword} noValidate>
               <label className="form-label" htmlFor="current-password">Current password</label>
-              <input className="form-input" id="current-password" type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
+              <PasswordInput className="form-input" id="current-password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
               <label className="form-label mt-5" htmlFor="new-password">New password</label>
-              <input className="form-input" id="new-password" type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
-              <p className="mt-2 text-xs text-slate-500">Use at least 8 characters.</p>
+              <PasswordInput className="form-input" id="new-password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+              <PasswordRequirements password={newPassword} />
               <label className="form-label mt-5" htmlFor="confirm-password">Confirm new password</label>
-              <input className="form-input" id="confirm-password" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+              <PasswordInput className="form-input" id="confirm-password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
               <div className="mt-5 flex flex-wrap gap-3">
                 <button className="button-primary" type="submit" disabled={isSavingPassword}>{isSavingPassword ? 'Updating…' : 'Update password'}</button>
                 <button className="button-secondary" type="button" disabled={isSavingPassword} onClick={() => { setIsChangingPassword(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setPasswordMessage(null) }}>Cancel</button>
