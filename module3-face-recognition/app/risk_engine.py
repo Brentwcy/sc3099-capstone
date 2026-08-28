@@ -64,6 +64,15 @@ class RiskEngine:
             return 0.70
         return 0.15  # Default un-attested device baseline
 
+    def evaluate_time_risk(self, check_in_time, session_start_time, session_end_time) -> float:
+        """Flag check-ins outside the scheduled session window."""
+        if not check_in_time or not session_start_time or not session_end_time:
+            return 0.20
+        check_in = check_in_time.replace(tzinfo=None)
+        start = session_start_time.replace(tzinfo=None)
+        end = session_end_time.replace(tzinfo=None)
+        return 0.05 if start <= check_in <= end else 0.90
+
     def assess_risk(self, request: RiskAssessRequest) -> RiskAssessResponse:
         """Perform weighted multi-signal risk fusion."""
         # 1. Biometric Signals (inverted: low score -> high risk)
@@ -77,23 +86,27 @@ class RiskEngine:
         device_risk = self.evaluate_device_risk(request.device_signature, request.device_public_key)
         network_risk = self.evaluate_network_risk(request.ip_address, request.user_agent)
         geo_risk = self.evaluate_geolocation_risk(request.geolocation)
+        time_risk = self.evaluate_time_risk(
+            request.check_in_time, request.session_start_time, request.session_end_time
+        )
 
-        # 3. Weighted Fusion (25% Liveness, 25% Match, 20% Device, 15% Network, 15% Geo)
-        c_liveness = 0.25 * liveness_risk
-        c_match = 0.25 * match_risk
-        c_device = 0.20 * device_risk
-        c_network = 0.15 * network_risk
-        c_geo = 0.15 * geo_risk
+        # 3. Weighted Fusion, including the session-time signal.
+        c_liveness = 0.22 * liveness_risk
+        c_match = 0.22 * match_risk
+        c_device = 0.18 * device_risk
+        c_network = 0.14 * network_risk
+        c_geo = 0.14 * geo_risk
+        c_time = 0.10 * time_risk
 
-        total_risk = c_liveness + c_match + c_device + c_network + c_geo
+        total_risk = c_liveness + c_match + c_device + c_network + c_geo + c_time
         total_risk = float(round(max(0.0, min(1.0, total_risk)), 4))
 
         # 4. Risk Level Mapping
         if total_risk < 0.30:
             risk_level = "LOW"
-        elif total_risk < 0.50:
+        elif total_risk <= 0.60:
             risk_level = "MEDIUM"
-        elif total_risk < 0.70:
+        elif total_risk <= 0.80:
             risk_level = "HIGH"
         else:
             risk_level = "CRITICAL"
@@ -107,6 +120,7 @@ class RiskEngine:
             "device": round(c_device, 4),
             "network": round(c_network, 4),
             "geolocation": round(c_geo, 4),
+            "time": round(c_time, 4),
         }
 
         # 6. Actionable recommendations
@@ -119,6 +133,8 @@ class RiskEngine:
             recommendations.append("Disable VPN or proxy connections during check-in")
         if geo_risk > 0.40:
             recommendations.append("Enable precise location services")
+        if time_risk > 0.40:
+            recommendations.append("Check in during the scheduled session window")
         if device_risk > 0.40:
             recommendations.append("Register device binding keypair")
 

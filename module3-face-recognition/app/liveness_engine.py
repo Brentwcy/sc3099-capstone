@@ -95,13 +95,16 @@ class LivenessEngine:
         self,
         image_rgb: np.ndarray,
         landmarks,
-        challenge_type: str = "passive"
+        challenge_type: str = "passive",
+        initial_landmarks=None
     ) -> tuple[float, bool, dict[str, Any]]:
         """
         Evaluate liveness and return (liveness_score, liveness_passed, details).
         """
         if landmarks is None or len(landmarks) < 468:
             return 0.0, False, {"error": "Incomplete face mesh"}
+        if challenge_type != "passive" and (initial_landmarks is None or len(initial_landmarks) < 468):
+            return 0.0, False, {"error": "Active challenge requires two complete face frames"}
 
         depth_score, nose_z, depth_detected = self.analyze_3d_depth(landmarks)
         texture_score = self.analyze_texture(image_rgb, landmarks)
@@ -109,11 +112,13 @@ class LivenessEngine:
 
         if challenge_type == "blink":
             ear = self.calculate_ear(landmarks)
-            blink_score = 1.0 if ear < 0.22 else 0.40
+            initial_ear = self.calculate_ear(initial_landmarks)
+            blink_score = 1.0 if initial_ear >= 0.22 and ear < 0.22 else 0.0
             score = 0.50 * blink_score + 0.30 * depth_score + 0.20 * texture_score
         elif challenge_type == "head_turn":
             yaw_ratio = self.calculate_head_rotation(landmarks)
-            turn_score = 1.0 if yaw_ratio > 1.4 else 0.40
+            initial_yaw_ratio = self.calculate_head_rotation(initial_landmarks)
+            turn_score = 1.0 if abs(yaw_ratio - initial_yaw_ratio) > 0.25 else 0.0
             score = 0.50 * turn_score + 0.30 * depth_score + 0.20 * texture_score
         else:  # passive
             score = 0.40 * depth_score + 0.35 * texture_score + 0.25 * (1.0 if mesh_complete else 0.0)
