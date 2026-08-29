@@ -12,15 +12,19 @@ const formatTime = (value: string) => new Intl.DateTimeFormat('en-SG', { hour: '
 const formatDateTime = (value: string) => new Intl.DateTimeFormat('en-SG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
 
 const attendanceStyles: Record<AttendanceStatus, string> = {
+  pending: 'bg-blue-100 text-blue-800',
   approved: 'bg-emerald-100 text-emerald-800',
-  'pending-review': 'bg-amber-100 text-amber-900',
+  flagged: 'bg-amber-100 text-amber-900',
   rejected: 'bg-red-100 text-red-800',
+  appealed: 'bg-violet-100 text-violet-800',
 }
 
 const attendanceLabels: Record<AttendanceStatus, string> = {
+  pending: 'Processing',
   approved: 'Approved',
-  'pending-review': 'Pending review',
+  flagged: 'Under review',
   rejected: 'Rejected',
+  appealed: 'Appeal submitted',
 }
 
 const activeSessionGrid = 'lg:grid-cols-[2fr_0.75fr_0.65fr_1fr_0.65fr_0.9fr]'
@@ -29,16 +33,16 @@ const attendanceGrid = 'lg:grid-cols-[minmax(15rem,2fr)_1.1fr_0.8fr_0.8fr]'
 const sessionStyles: Record<SessionAvailability, string> = {
   open: 'bg-emerald-100 text-emerald-800',
   upcoming: 'bg-blue-100 text-blue-800',
-  'checked-in': 'bg-emerald-100 text-emerald-800',
   closed: 'bg-slate-100 text-slate-700',
 }
 
 const sessionLabels: Record<SessionAvailability, string> = {
   open: 'Open',
   upcoming: 'Upcoming',
-  'checked-in': 'Checked in',
   closed: 'Closed',
 }
+
+const formatSessionType = (value: DashboardSession['sessionType']) => value.charAt(0).toUpperCase() + value.slice(1)
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -118,13 +122,13 @@ export default function DashboardPage() {
         ) : (
           <div className="mt-5 overflow-hidden rounded-xl border border-slate-200">
             <div className={`hidden gap-4 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid ${activeSessionGrid}`}>
-              <span>Course</span><span>Session</span><span>Location</span><span>Time</span><span>Status</span><span>Action</span>
+              <span>Course</span><span>Type</span><span>Location</span><span>Time</span><span>Status</span><span>Action</span>
             </div>
             {sessions.map((session) => (
               <article key={session.id} className={`grid gap-4 border-t border-slate-200 p-4 first:border-t-0 lg:items-center ${activeSessionGrid}`}>
-                <div><p className="font-semibold text-slate-950">{session.courseCode} {session.courseName}</p><p className="mt-1 text-xs text-slate-500">{session.instructor}</p></div>
-                <div><p className="text-xs text-slate-500 lg:hidden">Session</p><p className="mt-1 text-sm font-medium text-slate-800 lg:mt-0">{session.sessionName}</p></div>
-                <div><p className="text-xs text-slate-500 lg:hidden">Location</p><p className="mt-1 text-sm text-slate-800 lg:mt-0">{session.location}</p></div>
+                <div><p className="font-semibold text-slate-950">{[session.courseCode, session.courseName].filter(Boolean).join(' ') || 'Course unavailable'}</p><p className="mt-1 text-xs text-slate-500">{session.sessionName}</p></div>
+                <div><p className="text-xs text-slate-500 lg:hidden">Type</p><p className="mt-1 text-sm font-medium text-slate-800 lg:mt-0">{formatSessionType(session.sessionType)}</p></div>
+                <div><p className="text-xs text-slate-500 lg:hidden">Location</p><p className="mt-1 text-sm text-slate-800 lg:mt-0">{session.venueName ?? 'Not specified'}</p></div>
                 <div><p className="text-xs text-slate-500 lg:hidden">Time</p><p className="mt-1 whitespace-nowrap text-sm text-slate-800 lg:mt-0">{formatTime(session.startsAt)}–{formatTime(session.endsAt)}</p></div>
                 <div><p className="text-xs text-slate-500 lg:hidden">Status</p><span className={`mt-1 inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold lg:mt-0 ${sessionStyles[session.availability]}`}>{sessionLabels[session.availability]}</span></div>
                 <div>
@@ -132,8 +136,6 @@ export default function DashboardPage() {
                     <Link className="button-secondary w-full whitespace-nowrap lg:w-auto" href={setupHref}>Complete setup</Link>
                   ) : session.availability === 'open' ? (
                     <Link className="button-primary w-full whitespace-nowrap lg:w-auto" href={`/sessions?session=${session.id}`}>Check in</Link>
-                  ) : session.availability === 'checked-in' ? (
-                    <span className="whitespace-nowrap text-sm font-semibold text-emerald-700">Checked in{session.checkedInAt ? ` at ${formatTime(session.checkedInAt)}` : ''}</span>
                   ) : (
                     <span className="whitespace-nowrap text-sm font-medium text-slate-500">{session.availability === 'upcoming' ? 'Not open yet' : 'Closed'}</span>
                   )}
@@ -157,13 +159,13 @@ export default function DashboardPage() {
         ) : (
           <div className="mt-5 overflow-hidden rounded-xl border border-slate-200">
             <div className={`hidden gap-4 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid ${attendanceGrid}`}>
-              <span>Course</span><span>Date</span><span>Session</span><span>Status</span>
+              <span>Course</span><span>Session</span><span>Submitted at</span><span>Status</span>
             </div>
             {attendance.map((record) => (
               <article key={record.id} className={`grid gap-3 border-t border-slate-200 p-4 first:border-t-0 lg:items-center ${attendanceGrid}`}>
-                <div><p className="font-semibold text-slate-950">{record.courseCode} {record.courseName}</p><p className="mt-1 text-xs text-slate-500">{record.instructor}</p></div>
-                <div><p className="text-xs text-slate-500 lg:hidden">Date</p><p className="mt-1 whitespace-nowrap text-sm text-slate-800 lg:mt-0">{formatDateTime(record.occurredAt)}</p></div>
-                <div><p className="text-xs text-slate-500 lg:hidden">Session</p><p className="mt-1 text-sm text-slate-800 lg:mt-0">{record.sessionType}</p></div>
+                <div><p className="font-semibold text-slate-950">{record.courseCode}</p></div>
+                <div><p className="text-xs text-slate-500 lg:hidden">Session</p><p className="mt-1 text-sm text-slate-800 lg:mt-0">{record.sessionName}</p></div>
+                <div><p className="text-xs text-slate-500 lg:hidden">Submitted at</p><p className="mt-1 whitespace-nowrap text-sm text-slate-800 lg:mt-0">{formatDateTime(record.checkedInAt)}</p></div>
                 <div><p className="text-xs text-slate-500 lg:hidden">Status</p><span className={`mt-1 inline-flex rounded-full px-3 py-1 text-xs font-semibold lg:mt-0 ${attendanceStyles[record.status]}`}>{attendanceLabels[record.status]}</span></div>
               </article>
             ))}

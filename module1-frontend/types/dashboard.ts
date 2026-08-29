@@ -1,27 +1,30 @@
-export type SessionAvailability = 'open' | 'upcoming' | 'checked-in' | 'closed'
-export type AttendanceStatus = 'approved' | 'pending-review' | 'rejected'
+export type SessionAvailability = 'open' | 'upcoming' | 'closed'
+export type AttendanceStatus = 'pending' | 'approved' | 'flagged' | 'rejected' | 'appealed'
 
 export interface DashboardSession {
   id: string
-  courseCode: string
-  courseName: string
-  instructor: string
+  courseCode: string | null
+  courseName: string | null
   sessionName: string
-  location: string
+  sessionType: 'lecture' | 'tutorial' | 'lab' | 'exam'
+  venueName: string | null
   startsAt: string
   endsAt: string
+  checkinClosesAt: string
+  requireLivenessCheck: boolean
+  requireFaceMatch: boolean
+  qrCodeEnabled: boolean
   availability: SessionAvailability
-  checkedInAt?: string
 }
 
 export interface AttendanceRecord {
   id: string
+  sessionId: string
   courseCode: string
-  courseName: string
-  instructor: string
-  occurredAt: string
-  sessionType: string
+  sessionName: string
+  checkedInAt: string
   status: AttendanceStatus
+  riskScore: number
 }
 
 export interface DashboardDataService {
