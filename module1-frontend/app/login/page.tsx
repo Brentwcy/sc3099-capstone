@@ -104,10 +104,6 @@ export default function LoginPage() {
             {isSubmitting ? 'Signing in…' : 'Sign in'}
           </button>
 
-          <p className="mt-4 text-center text-sm">
-            <Link className="font-semibold text-blue-700 hover:text-blue-900" href="/forgot-password">Forgot password?</Link>
-          </p>
-
           <p className="mt-5 text-center text-sm text-slate-600">
             Need an account?{' '}
             <Link className="font-semibold text-blue-700 hover:text-blue-900" href="/register">Register</Link>

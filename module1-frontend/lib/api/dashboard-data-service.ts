@@ -1,4 +1,6 @@
 import { apiClient } from '@/lib/api/client'
+import { MOCK_CHECKINS_KEY } from '@/lib/api/checkin-service'
+import type { StoredMockCheckIn } from '@/types/checkin'
 import type { AttendanceRecord, DashboardDataService, DashboardSession } from '@/types/dashboard'
 
 type SessionResponseDto = {
@@ -102,7 +104,13 @@ export const mockDashboardDataService: DashboardDataService = {
   },
   async getRecentAttendance(limit = 3) {
     await wait(250)
-    return mockAttendance.slice(0, limit)
+    let submitted: StoredMockCheckIn[] = []
+    try {
+      submitted = JSON.parse(window.localStorage.getItem(MOCK_CHECKINS_KEY) ?? '[]') as StoredMockCheckIn[]
+    } catch {
+      window.localStorage.removeItem(MOCK_CHECKINS_KEY)
+    }
+    return [...submitted.map(mapAttendance), ...mockAttendance].slice(0, limit)
   },
 }
 

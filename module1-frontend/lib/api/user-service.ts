@@ -2,12 +2,11 @@ import { apiClient } from '@/lib/api/client'
 import { getSession } from '@/lib/auth/session-storage'
 import type { UpdateConsentRequest } from '@/types/consent'
 import type { User } from '@/types/auth'
-import type { ChangePasswordRequest, ChangePasswordResponse, UpdateProfileRequest } from '@/types/settings'
+import type { UpdateProfileRequest } from '@/types/settings'
 
 export interface UserService {
   updateConsent(consent: UpdateConsentRequest): Promise<User>
   updateProfile(profile: UpdateProfileRequest): Promise<User>
-  changePassword(passwords: ChangePasswordRequest): Promise<ChangePasswordResponse>
 }
 
 export const mockUserService: UserService = {
@@ -23,10 +22,6 @@ export const mockUserService: UserService = {
     if (!user) throw new Error('Your session has expired. Please sign in again.')
     return { ...user, full_name: profile.full_name }
   },
-  async changePassword() {
-    await new Promise((resolve) => window.setTimeout(resolve, 400))
-    return { message: 'Password validation completed in mock mode. No backend credential was changed.' }
-  },
 }
 
 export const httpUserService: UserService = {
@@ -36,10 +31,6 @@ export const httpUserService: UserService = {
   },
   async updateProfile(profile) {
     const { data } = await apiClient.put<User>('/users/me', profile)
-    return data
-  },
-  async changePassword(passwords) {
-    const { data } = await apiClient.put<ChangePasswordResponse>('/users/me/password', passwords)
     return data
   },
 }

@@ -115,7 +115,7 @@ export default function SessionsPage() {
                       {!setupComplete ? (
                         <Link className="button-secondary w-full lg:w-auto" href={setupHref}>Complete setup</Link>
                       ) : session.availability === 'open' ? (
-                        <Link className="button-primary w-full lg:w-auto" href={`/sessions?session=${session.id}`}>Check in</Link>
+                        <Link className="button-primary w-full lg:w-auto" href={`/check-in?session=${session.id}`}>Check in</Link>
                       ) : (
                         <p className="text-sm font-medium text-slate-500">{session.availability === 'upcoming' ? 'Check-in has not opened' : 'Check-in is closed'}</p>
                       )}

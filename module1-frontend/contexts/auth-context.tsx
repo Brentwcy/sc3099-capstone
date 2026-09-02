@@ -12,7 +12,7 @@ import {
 } from '@/lib/auth/session-storage'
 import type { LoginRequest, RegisterRequest, User } from '@/types/auth'
 import type { UpdateConsentRequest } from '@/types/consent'
-import type { ChangePasswordRequest, ChangePasswordResponse, UpdateProfileRequest } from '@/types/settings'
+import type { UpdateProfileRequest } from '@/types/settings'
 
 interface AuthContextValue {
   user: User | null
@@ -22,7 +22,6 @@ interface AuthContextValue {
   register(details: RegisterRequest): Promise<void>
   updateConsent(consent: UpdateConsentRequest): Promise<void>
   updateProfile(profile: UpdateProfileRequest): Promise<void>
-  changePassword(passwords: ChangePasswordRequest): Promise<ChangePasswordResponse>
   logout(): void
 }
 
@@ -85,11 +84,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setStoredSession({ ...currentSession, user })
   }, [])
 
-  const changePassword = useCallback(
-    async (passwords: ChangePasswordRequest) => userService.changePassword(passwords),
-    [],
-  )
-
   const value = useMemo<AuthContextValue>(() => ({
     user: session?.user ?? null,
     accessToken: session?.accessToken ?? null,
@@ -98,9 +92,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     register,
     updateConsent,
     updateProfile,
-    changePassword,
     logout,
-  }), [changePassword, isLoading, login, logout, register, session, updateConsent, updateProfile])
+  }), [isLoading, login, logout, register, session, updateConsent, updateProfile])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
