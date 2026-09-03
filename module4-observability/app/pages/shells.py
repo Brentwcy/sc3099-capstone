@@ -1,10 +1,9 @@
-"""Placeholder pages included in the confirmed Week 1 scope."""
+"""Placeholder pages for allowed routes that are not implemented yet."""
 
 import streamlit as st
 
 
 PAGE_DESCRIPTIONS = {
-    "My Attendance": "Your attendance history will be shown here in a later week.",
     "Check-ins": "Check-in records will be added in a later week.",
     "Flagged Review": "The flagged check-in review queue will be added in a later week.",
     "Analytics": "Attendance analytics will be added in a later week.",
@@ -15,7 +14,6 @@ PAGE_DESCRIPTIONS = {
 
 SESSION_DESCRIPTIONS = {
     "student": "Your relevant, read-only session information will be shown here in a later week.",
-    "ta": "Assisted and relevant session information will be shown here in a later week.",
     "instructor": "Session management will be added in a later week.",
 }
 

@@ -272,7 +272,6 @@ class LogoutTests(unittest.TestCase):
                 fake_streamlit.reset()
                 set_authenticated(role)
                 fake_streamlit.session_state.selected_page = "Analytics"
-                fake_streamlit.session_state.mock_role = "instructor"
                 fake_streamlit.sidebar.logout_clicked = True
 
                 self.assertIsNone(render_sidebar())
@@ -297,7 +296,6 @@ class LogoutTests(unittest.TestCase):
                     },
                 )
                 self.assertNotIn("selected_page", fake_streamlit.session_state)
-                self.assertNotIn("mock_role", fake_streamlit.session_state)
                 self.assertEqual(fake_streamlit.rerun_count, 1)
 
     def test_protected_content_cannot_render_after_logout(self) -> None:

@@ -15,8 +15,7 @@ def render_sidebar() -> str | None:
 
     if st.sidebar.button("Logout", use_container_width=True):
         clear_auth_state()
-        for key in ("selected_page", "mock_role", "mock_user"):
-            st.session_state.pop(key, None)
+        st.session_state.pop("selected_page", None)
         st.rerun()
         return None
 

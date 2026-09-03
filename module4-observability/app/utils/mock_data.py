@@ -1,67 +1,4 @@
-"""Mock Week 1 data shaped like the documented backend contracts."""
-
-MOCK_USERS = {
-    "student": {
-        "id": "11111111-1111-4111-8111-111111111111",
-        "email": "student@example.com",
-        "full_name": "Avery Student",
-        "role": "student",
-        "is_active": True,
-    },
-    "ta": {
-        "id": "22222222-2222-4222-8222-222222222222",
-        "email": "ta@example.com",
-        "full_name": "Taylor Assistant",
-        "role": "ta",
-        "is_active": True,
-    },
-    "instructor": {
-        "id": "33333333-3333-4333-8333-333333333333",
-        "email": "instructor@example.com",
-        "full_name": "Indra Instructor",
-        "role": "instructor",
-        "is_active": True,
-    },
-    "admin": {
-        "id": "44444444-4444-4444-8444-444444444444",
-        "email": "admin@example.com",
-        "full_name": "Alex Admin",
-        "role": "admin",
-        "is_active": True,
-    },
-}
-
-MOCK_OVERVIEW_STATS = {
-    "total_sessions": 12,
-    "active_sessions": 2,
-    "total_courses": 3,
-    "total_students": 86,
-    "total_checkins_today": 47,
-    "today_checkins": 47,
-    "total_checkins_week": 214,
-    "average_attendance_rate": 0.88,
-    "flagged_pending_review": 3,
-    "flagged_pending": 3,
-    "approval_rate": 0.94,
-    "average_risk_score": 0.16,
-    "high_risk_checkins_today": 2,
-    "trends": {
-        "checkins_by_day": [
-            {"date": "2026-08-19", "count": 39},
-            {"date": "2026-08-20", "count": 44},
-            {"date": "2026-08-21", "count": 41},
-            {"date": "2026-08-22", "count": 43},
-            {"date": "2026-08-23", "count": 47},
-        ],
-        "attendance_rate_by_day": [
-            {"date": "2026-08-19", "rate": 0.84},
-            {"date": "2026-08-20", "rate": 0.91},
-            {"date": "2026-08-21", "rate": 0.87},
-            {"date": "2026-08-22", "rate": 0.89},
-            {"date": "2026-08-23", "rate": 0.90},
-        ],
-    },
-}
+"""API-compatible development sessions used by the TA review page."""
 
 MOCK_SESSIONS = [
     {
@@ -69,7 +6,6 @@ MOCK_SESSIONS = [
         "course_id": "cccccccc-cccc-4ccc-8ccc-ccccccccccc1",
         "course_code": "SC3099",
         "course_name": "Capstone Project",
-        "instructor_id": MOCK_USERS["instructor"]["id"],
         "name": "Week 1 Project Studio",
         "session_type": "tutorial",
         "status": "active",
@@ -86,7 +22,6 @@ MOCK_SESSIONS = [
         "course_id": "cccccccc-cccc-4ccc-8ccc-ccccccccccc2",
         "course_code": "CZ3002",
         "course_name": "Advanced Software Engineering",
-        "instructor_id": MOCK_USERS["instructor"]["id"],
         "name": "Architecture Lecture",
         "session_type": "lecture",
         "status": "scheduled",
@@ -97,60 +32,5 @@ MOCK_SESSIONS = [
         "venue_name": "NTU TR+12",
         "total_enrolled": 38,
         "checked_in_count": 0,
-    },
-]
-
-MOCK_CHECKINS = [
-    {
-        "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
-        "session_id": MOCK_SESSIONS[0]["id"],
-        "session_name": MOCK_SESSIONS[0]["name"],
-        "student_id": "55555555-5555-4555-8555-555555555551",
-        "student_name": "Jamie Tan",
-        "student_email": "jamie.tan@example.com",
-        "status": "approved",
-        "checked_in_at": "2026-08-23T08:57:00+08:00",
-        "distance_from_venue_meters": 18.4,
-        "risk_score": 0.08,
-        "liveness_passed": True,
-    },
-    {
-        "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
-        "session_id": MOCK_SESSIONS[0]["id"],
-        "session_name": MOCK_SESSIONS[0]["name"],
-        "student_id": "55555555-5555-4555-8555-555555555552",
-        "student_name": "Morgan Lim",
-        "student_email": "morgan.lim@example.com",
-        "status": "approved",
-        "checked_in_at": "2026-08-23T08:59:00+08:00",
-        "distance_from_venue_meters": 31.7,
-        "risk_score": 0.12,
-        "liveness_passed": True,
-    },
-    {
-        "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
-        "session_id": MOCK_SESSIONS[0]["id"],
-        "session_name": MOCK_SESSIONS[0]["name"],
-        "student_id": "55555555-5555-4555-8555-555555555553",
-        "student_name": "Riley Goh",
-        "student_email": "riley.goh@example.com",
-        "status": "flagged",
-        "checked_in_at": "2026-08-23T09:02:00+08:00",
-        "distance_from_venue_meters": 108.2,
-        "risk_score": 0.67,
-        "liveness_passed": True,
-    },
-    {
-        "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4",
-        "session_id": MOCK_SESSIONS[0]["id"],
-        "session_name": MOCK_SESSIONS[0]["name"],
-        "student_id": "55555555-5555-4555-8555-555555555554",
-        "student_name": "Casey Ong",
-        "student_email": "casey.ong@example.com",
-        "status": "approved",
-        "checked_in_at": "2026-08-23T09:04:00+08:00",
-        "distance_from_venue_meters": 22.9,
-        "risk_score": 0.10,
-        "liveness_passed": True,
     },
 ]

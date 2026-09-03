@@ -73,6 +73,22 @@ class APIClient:
             raise APIClientError("Backend returned an invalid response")
         return payload
 
+    @staticmethod
+    def _response_list(response: requests.Response) -> list[Any]:
+        """Parse a successful backend response that must be a JSON list."""
+        try:
+            payload: Any = response.json()
+        except requests.exceptions.JSONDecodeError:
+            raise APIClientError("Backend returned an invalid JSON response") from None
+        if not isinstance(payload, list):
+            raise APIClientError("Backend returned an invalid response")
+        return payload
+
+    @staticmethod
+    def _defined_params(**params: Any) -> dict[str, Any]:
+        """Return query parameters whose values are explicitly defined."""
+        return {key: value for key, value in params.items() if value is not None}
+
     def _request(
         self,
         method: str,
@@ -201,6 +217,215 @@ class APIClient:
         """Return the current user using the supplied access token."""
         response = self.get(
             "/api/v1/users/me",
+            access_token=access_token,
+        )
+        return self._response_object(response)
+
+    def get_courses(
+        self,
+        access_token: str,
+        *,
+        is_active: bool | None = True,
+        semester: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return the authenticated course listing."""
+        response = self.get(
+            "/api/v1/courses/",
+            params=self._defined_params(
+                is_active=is_active,
+                semester=semester,
+                limit=limit,
+                offset=offset,
+            ),
+            access_token=access_token,
+        )
+        return self._response_object(response)
+
+    def get_course(self, access_token: str, course_id: str) -> dict[str, Any]:
+        """Return one course by ID."""
+        response = self.get(
+            f"/api/v1/courses/{course_id}",
+            access_token=access_token,
+        )
+        return self._response_object(response)
+
+    def get_sessions(
+        self,
+        access_token: str,
+        *,
+        status: str | None = None,
+        course_id: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return the authenticated session listing."""
+        response = self.get(
+            "/api/v1/sessions/",
+            params=self._defined_params(
+                status=status,
+                course_id=course_id,
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+                offset=offset,
+            ),
+            access_token=access_token,
+        )
+        return self._response_object(response)
+
+    def get_my_sessions(
+        self,
+        access_token: str,
+        *,
+        status: str | None = None,
+        upcoming: bool = False,
+        limit: int = 50,
+    ) -> list[Any]:
+        """Return sessions relevant to the authenticated user."""
+        response = self.get(
+            "/api/v1/sessions/my-sessions",
+            params=self._defined_params(
+                status=status,
+                upcoming=upcoming,
+                limit=limit,
+            ),
+            access_token=access_token,
+        )
+        return self._response_list(response)
+
+    def get_session(self, access_token: str, session_id: str) -> dict[str, Any]:
+        """Return one session by ID."""
+        response = self.get(
+            f"/api/v1/sessions/{session_id}",
+            access_token=access_token,
+        )
+        return self._response_object(response)
+
+    def get_my_checkins(
+        self,
+        access_token: str,
+        *,
+        course_id: str | None = None,
+        limit: int = 50,
+    ) -> list[Any]:
+        """Return the authenticated student's check-in history."""
+        response = self.get(
+            "/api/v1/checkins/my-checkins",
+            params=self._defined_params(course_id=course_id, limit=limit),
+            access_token=access_token,
+        )
+        return self._response_list(response)
+
+    def get_checkins(
+        self,
+        access_token: str,
+        *,
+        session_id: str | None = None,
+        course_id: str | None = None,
+        student_id: str | None = None,
+        status: str | None = None,
+        min_risk_score: float | None = None,
+        max_risk_score: float | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return the authenticated check-in listing."""
+        response = self.get(
+            "/api/v1/checkins/",
+            params=self._defined_params(
+                session_id=session_id,
+                course_id=course_id,
+                student_id=student_id,
+                status=status,
+                min_risk_score=min_risk_score,
+                max_risk_score=max_risk_score,
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+                offset=offset,
+            ),
+            access_token=access_token,
+        )
+        return self._response_object(response)
+
+    def get_checkin(self, access_token: str, checkin_id: str) -> dict[str, Any]:
+        """Return one check-in by ID."""
+        response = self.get(
+            f"/api/v1/checkins/{checkin_id}",
+            access_token=access_token,
+        )
+        return self._response_object(response)
+
+    def get_session_checkins(
+        self,
+        access_token: str,
+        session_id: str,
+    ) -> list[Any]:
+        """Return check-ins for one session."""
+        response = self.get(
+            f"/api/v1/checkins/session/{session_id}",
+            access_token=access_token,
+        )
+        return self._response_list(response)
+
+    def get_my_enrollments(self, access_token: str) -> list[Any]:
+        """Return the authenticated student's enrollments."""
+        response = self.get(
+            "/api/v1/enrollments/my-enrollments",
+            access_token=access_token,
+        )
+        return self._response_list(response)
+
+    def get_course_enrollments(
+        self,
+        access_token: str,
+        course_id: str,
+        *,
+        is_active: bool | None = True,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        """Return the enrollment roster for one course."""
+        response = self.get(
+            f"/api/v1/enrollments/course/{course_id}",
+            params=self._defined_params(is_active=is_active, search=search),
+            access_token=access_token,
+        )
+        return self._response_object(response)
+
+    def get_audit_logs(
+        self,
+        access_token: str,
+        *,
+        user_id: str | None = None,
+        action: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        success: bool | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return the filtered audit-log listing."""
+        response = self.get(
+            "/api/v1/audit/",
+            params=self._defined_params(
+                user_id=user_id,
+                action=action,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                success=success,
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+                offset=offset,
+            ),
             access_token=access_token,
         )
         return self._response_object(response)

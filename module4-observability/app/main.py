@@ -1,4 +1,4 @@
-"""Week 1 Streamlit shell for the SAIV observability dashboard."""
+"""Authenticated Streamlit entry point for the SAIV observability dashboard."""
 
 import streamlit as st
 
@@ -16,7 +16,7 @@ st.set_page_config(
 
 
 def main() -> None:
-    """Render the login gate or the authenticated Week 1 dashboard."""
+    """Render the login gate or the authenticated role dashboard."""
     initialize_auth_state()
     client = APIClient()
     if not st.session_state.authenticated:
