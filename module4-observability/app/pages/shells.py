@@ -1,11 +1,9 @@
-"""Placeholder pages included in the confirmed Week 1 scope."""
+"""Placeholder pages for allowed routes that are not implemented yet."""
 
 import streamlit as st
 
 
 PAGE_DESCRIPTIONS = {
-    "My Attendance": "Your attendance history will be shown here in a later week.",
-    "Sessions": "Session management will be added in a later week.",
     "Check-ins": "Check-in records will be added in a later week.",
     "Flagged Review": "The flagged check-in review queue will be added in a later week.",
     "Analytics": "Attendance analytics will be added in a later week.",
@@ -14,8 +12,16 @@ PAGE_DESCRIPTIONS = {
     "System Metrics": "System metrics will be added in a later week.",
 }
 
+SESSION_DESCRIPTIONS = {
+    "student": "Your relevant, read-only session information will be shown here in a later week.",
+    "instructor": "Session management will be added in a later week.",
+}
 
-def render_shell(page_name: str) -> None:
+
+def render_shell(page_name: str, role: str) -> None:
     """Render a named navigation shell with no later-week behaviour."""
     st.title(page_name)
-    st.info(PAGE_DESCRIPTIONS[page_name])
+    if page_name == "Sessions":
+        st.info(SESSION_DESCRIPTIONS[role])
+    else:
+        st.info(PAGE_DESCRIPTIONS[page_name])
