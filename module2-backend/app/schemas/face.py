@@ -16,6 +16,10 @@ class FaceEnrollResult(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class UserFaceEnrollmentRequest(BaseModel):
+    image: str = Field(min_length=1, max_length=15_000_000)
+
+
 class FaceVerifyRequest(BaseModel):
     image: str
     reference_template_hash: str

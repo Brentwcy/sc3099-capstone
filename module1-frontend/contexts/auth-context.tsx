@@ -22,6 +22,7 @@ interface AuthContextValue {
   register(details: RegisterRequest): Promise<void>
   updateConsent(consent: UpdateConsentRequest): Promise<void>
   updateProfile(profile: UpdateProfileRequest): Promise<void>
+  enrollFace(image: string): Promise<void>
   logout(): void
 }
 
@@ -84,6 +85,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setStoredSession({ ...currentSession, user })
   }, [])
 
+  const enrollFace = useCallback(async (image: string) => {
+    const currentSession = getSession()
+    if (!currentSession) throw new Error('Your session has expired. Please sign in again.')
+    const user = await userService.enrollFace(image)
+    setStoredSession({ ...currentSession, user })
+  }, [])
+
   const value = useMemo<AuthContextValue>(() => ({
     user: session?.user ?? null,
     accessToken: session?.accessToken ?? null,
@@ -92,8 +100,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     register,
     updateConsent,
     updateProfile,
+    enrollFace,
     logout,
-  }), [isLoading, login, logout, register, session, updateConsent, updateProfile])
+  }), [enrollFace, isLoading, login, logout, register, session, updateConsent, updateProfile])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

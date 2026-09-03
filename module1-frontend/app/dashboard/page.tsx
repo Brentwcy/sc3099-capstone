@@ -92,7 +92,7 @@ export default function DashboardPage() {
         <div>
           <p className="eyebrow">Student dashboard</p>
           <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Hello, {user.full_name}</h1>
-          <p className="mt-2 text-slate-600">Your Module 1 foundation is running in mock mode.</p>
+          <p className="mt-2 text-slate-600">Review active sessions and your latest attendance records.</p>
         </div>
         <span className="w-fit rounded-full bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-800">Signed in</span>
       </section>
@@ -135,7 +135,7 @@ export default function DashboardPage() {
                   {!setupComplete ? (
                     <Link className="button-secondary w-full whitespace-nowrap lg:w-auto" href={setupHref}>Complete setup</Link>
                   ) : session.availability === 'open' ? (
-                    <Link className="button-primary w-full whitespace-nowrap lg:w-auto" href={`/sessions?session=${session.id}`}>Check in</Link>
+                    <Link className="button-primary w-full whitespace-nowrap lg:w-auto" href={`/check-in?session=${session.id}`}>Check in</Link>
                   ) : (
                     <span className="whitespace-nowrap text-sm font-medium text-slate-500">{session.availability === 'upcoming' ? 'Not open yet' : 'Closed'}</span>
                   )}

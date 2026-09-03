@@ -76,7 +76,7 @@ export default function RegisterPage() {
       <div className="mx-auto max-w-lg py-8">
         <p className="eyebrow">Student registration</p>
         <h1 className="mt-3 text-4xl font-bold tracking-tight text-slate-950">Create your account</h1>
-        <p className="mt-3 text-slate-600">Registration currently uses the API-compatible mock service.</p>
+        <p className="mt-3 text-slate-600">Create your account to access secure attendance check-in.</p>
         <form className="card mt-8" onSubmit={handleSubmit} noValidate>
           <label className="form-label" htmlFor="full-name">Full name</label>
           <input className="form-input" id="full-name" autoComplete="name" required value={fullName} onChange={(event) => setFullName(event.target.value)} />

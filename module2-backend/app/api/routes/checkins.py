@@ -292,6 +292,7 @@ async def create_checkin(
         )
 
     liveness_result = None
+    face_match_result = None
     if payload.liveness_challenge_response is not None:
         try:
             liveness_result = await face_service.check_liveness(
@@ -330,6 +331,39 @@ async def create_checkin(
             )
         )
 
+    if attendance_session.require_face_match:
+        if not student.face_enrolled or not student.face_embedding_hash:
+            raise HTTPException(status_code=400, detail="Face enrollment is required")
+        if payload.liveness_challenge_response is None:
+            raise HTTPException(status_code=400, detail="A face image is required")
+        try:
+            face_match_result = await face_service.verify_face(
+                image=payload.liveness_challenge_response,
+                reference_template_hash=student.face_embedding_hash,
+            )
+        except FaceServiceRejected as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except FaceServiceError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
+        if not face_match_result.match_passed:
+            factors.append(
+                InitialRiskFactor(
+                    RiskSignalType.face_match_failed,
+                    RiskSeverity.critical,
+                    0.35,
+                    confidence=1.0 - face_match_result.match_score,
+                )
+            )
+        elif face_match_result.match_score < face_match_result.match_threshold:
+            factors.append(
+                InitialRiskFactor(
+                    RiskSignalType.face_match_low_confidence,
+                    RiskSeverity.high,
+                    0.20,
+                    confidence=1.0 - face_match_result.match_score,
+                )
+            )
+
     risk_threshold = (
         attendance_session.risk_threshold
         if attendance_session.risk_threshold is not None
@@ -341,7 +375,10 @@ async def create_checkin(
     liveness_failed = bool(
         liveness_result is not None and liveness_result.liveness_passed is False
     )
-    if far_outside_geofence or liveness_failed:
+    face_match_failed = bool(
+        face_match_result is not None and face_match_result.match_passed is False
+    )
+    if far_outside_geofence or liveness_failed or face_match_failed:
         result_status = CheckInStatus.rejected
     elif risk_score >= risk_threshold:
         result_status = CheckInStatus.flagged
@@ -363,9 +400,9 @@ async def create_checkin(
         liveness_passed=liveness_result.liveness_passed if liveness_result else None,
         liveness_score=liveness_result.liveness_score if liveness_result else None,
         liveness_challenge_type=liveness_result.challenge_type if liveness_result else None,
-        face_embedding_hash=(
-            liveness_result.face_embedding_hash if liveness_result else None
-        ),
+        face_match_passed=face_match_result.match_passed if face_match_result else None,
+        face_match_score=face_match_result.match_score if face_match_result else None,
+        face_embedding_hash=liveness_result.face_embedding_hash if liveness_result else None,
         risk_score=risk_score,
         risk_factors=json.dumps(public_factors, separators=(",", ":")),
         qr_code_verified=(

@@ -7,6 +7,7 @@ import type { UpdateProfileRequest } from '@/types/settings'
 export interface UserService {
   updateConsent(consent: UpdateConsentRequest): Promise<User>
   updateProfile(profile: UpdateProfileRequest): Promise<User>
+  enrollFace(image: string): Promise<User>
 }
 
 export const mockUserService: UserService = {
@@ -22,6 +23,12 @@ export const mockUserService: UserService = {
     if (!user) throw new Error('Your session has expired. Please sign in again.')
     return { ...user, full_name: profile.full_name }
   },
+  async enrollFace() {
+    await new Promise((resolve) => window.setTimeout(resolve, 500))
+    const user = getSession()?.user
+    if (!user) throw new Error('Your session has expired. Please sign in again.')
+    return { ...user, face_enrolled: true }
+  },
 }
 
 export const httpUserService: UserService = {
@@ -31,6 +38,10 @@ export const httpUserService: UserService = {
   },
   async updateProfile(profile) {
     const { data } = await apiClient.put<User>('/users/me', profile)
+    return data
+  },
+  async enrollFace(image) {
+    const { data } = await apiClient.post<User>('/users/me/face-enrollment', { image })
     return data
   },
 }

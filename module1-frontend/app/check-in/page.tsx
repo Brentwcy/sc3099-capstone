@@ -9,6 +9,7 @@ import { useAuth } from '@/contexts/auth-context'
 import { checkInService } from '@/lib/api/checkin-service'
 import { getApiErrorMessage } from '@/lib/api/client'
 import { dashboardDataService } from '@/lib/api/dashboard-data-service'
+import { captureVideoFrame } from '@/lib/device/camera'
 import { getDeviceFingerprint } from '@/lib/device/fingerprint'
 import type { CheckInResult } from '@/types/checkin'
 import type { DashboardSession } from '@/types/dashboard'
@@ -34,6 +35,7 @@ function CheckInFlow() {
   const [result, setResult] = useState<CheckInResult | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [cameraActive, setCameraActive] = useState(false)
+  const [cameraFrame, setCameraFrame] = useState<string | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -87,6 +89,13 @@ function CheckInFlow() {
   }
 
   const completeVerification = () => {
+    if (!videoRef.current) return
+    try {
+      setCameraFrame(captureVideoFrame(videoRef.current))
+    } catch (captureError) {
+      setError(captureError instanceof Error ? captureError.message : 'The camera frame could not be captured.')
+      return
+    }
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
     setCameraActive(false)
@@ -104,7 +113,7 @@ function CheckInFlow() {
         longitude: position.longitude,
         location_accuracy_meters: position.accuracy,
         device_fingerprint: getDeviceFingerprint(),
-        liveness_challenge_response: session.requireLivenessCheck ? 'mock_camera_challenge_passed' : undefined,
+        liveness_challenge_response: cameraFrame ?? undefined,
       }, { courseCode: session.courseCode ?? 'Unknown course', sessionName: session.sessionName })
       setResult(response)
       setStep('complete')
@@ -148,7 +157,7 @@ function CheckInFlow() {
 
           {step === 'review' && <div className="mt-6"><h3 className="font-semibold text-slate-950">Before you begin</h3><ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600"><li>• Stay at the class venue while verification runs.</li><li>• Allow precise location access when prompted.</li><li>• Keep your face visible in a well-lit area.</li></ul><button className="button-primary mt-6" type="button" onClick={captureLocation}>Begin verification</button></div>}
           {step === 'location' && <div className="mt-6" role="status"><h3 className="font-semibold text-slate-950">{error ? 'Location check unsuccessful' : 'Checking your location…'}</h3><p className="mt-2 text-sm text-slate-600">{error ? 'Review your browser permission and try the location check again.' : 'Your browser may ask for permission. This can take a few seconds.'}</p>{error && <div className="mt-5 flex flex-wrap gap-3"><button className="button-secondary" type="button" onClick={captureLocation}>Try location again</button>{isMockMode && <button className="button-primary" type="button" onClick={useDemoLocation}>Use demo location</button>}</div>}{error && isMockMode && <p className="mt-3 text-xs text-slate-500">Demo location uses the NTU test coordinates and is available only while mock mode is active.</p>}</div>}
-          {step === 'camera' && <div className="mt-6"><h3 className="font-semibold text-slate-950">Camera verification</h3><p className="mt-2 text-sm text-slate-600">Centre your face and look directly at the camera. In mock mode, confirming the preview completes the liveness step.</p><div className="mt-5 overflow-hidden rounded-2xl bg-slate-950"><video ref={videoRef} className="aspect-video w-full object-cover" autoPlay muted playsInline /></div><div className="mt-5 flex flex-wrap gap-3"><button className="button-secondary" type="button" onClick={() => void startVerification()}>Start camera</button><button className="button-primary" type="button" disabled={!cameraActive} onClick={completeVerification}>Confirm verification</button></div></div>}
+          {step === 'camera' && <div className="mt-6"><h3 className="font-semibold text-slate-950">Camera verification</h3><p className="mt-2 text-sm text-slate-600">Centre your face, look directly at the camera, and capture a clear verification frame.</p><div className="mt-5 overflow-hidden rounded-2xl bg-slate-950"><video ref={videoRef} className="aspect-video w-full object-cover" autoPlay muted playsInline /></div><div className="mt-5 flex flex-wrap gap-3"><button className="button-secondary" type="button" onClick={() => void startVerification()}>Start camera</button><button className="button-primary" type="button" disabled={!cameraActive} onClick={completeVerification}>Capture verification</button></div></div>}
           {(step === 'ready' || step === 'submitting') && <div className="mt-6"><h3 className="font-semibold text-slate-950">Ready to submit</h3><dl className="mt-4 grid gap-4 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-2"><div><dt className="text-slate-500">Location accuracy</dt><dd className="mt-1 font-semibold text-slate-900">{position ? `${Math.round(position.accuracy)} m` : 'Unavailable'}</dd></div><div><dt className="text-slate-500">Camera verification</dt><dd className="mt-1 font-semibold text-emerald-700">Completed</dd></div></dl><p className="mt-4 text-sm leading-6 text-slate-600">By submitting, you confirm that you are physically present at this session.</p><button className="button-primary mt-6" type="button" disabled={step === 'submitting'} onClick={() => void submit()}>{step === 'submitting' ? 'Submitting…' : 'Submit check-in'}</button></div>}
           {error && <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800" role="alert">{error}</div>}
         </section>

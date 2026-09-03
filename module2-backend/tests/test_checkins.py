@@ -5,6 +5,8 @@ from app.models.audit_log import AuditLog
 from app.models.checkin import CheckIn, CheckInStatus
 from app.models.risk_signal import RiskSignal
 from app.models.session import AttendanceSession
+from app.models.user import User
+from app.schemas.face import FaceVerifyResult
 from app.main import app
 from app.services.face_mock import LivenessResult, get_face_service
 
@@ -225,6 +227,63 @@ def test_atomic_checkin_uses_mock_and_persists_risk_signals(
     assert db_session.query(RiskSignal).count() == 1
     assert db_session.query(AuditLog).filter_by(action="checkin_attempted").count() == 2
     assert db_session.query(AuditLog).filter_by(action="checkin_approved").count() == 1
+
+
+def test_face_matching_uses_enrolled_template(
+    client,
+    db_session,
+    student,
+    instructor,
+    admin,
+):
+    student_user, student_headers = student
+    instructor_user, instructor_headers = instructor
+    _admin_user, admin_headers = admin
+    _course, session = create_checkin_setup(
+        client,
+        student_user=student_user,
+        student_headers=student_headers,
+        instructor_user=instructor_user,
+        instructor_headers=instructor_headers,
+        admin_headers=admin_headers,
+    )
+    persisted_student = db_session.get(User, student_user["id"])
+    persisted_student.face_enrolled = True
+    persisted_student.face_embedding_hash = "a" * 64
+    persisted_session = db_session.get(AttendanceSession, session["id"])
+    persisted_session.require_face_match = True
+    db_session.commit()
+
+    class MatchingFaceService:
+        async def check_liveness(self, **_kwargs):
+            return LivenessResult(
+                liveness_passed=True,
+                liveness_score=0.9,
+                challenge_type="passive",
+                face_embedding_hash="b" * 64,
+            )
+
+        async def verify_face(self, *, image, reference_template_hash):
+            assert image == "base64-test-image"
+            assert reference_template_hash == "a" * 64
+            return FaceVerifyResult(
+                match_passed=True,
+                match_score=0.94,
+                match_threshold=0.7,
+                face_detected=True,
+            )
+
+    app.dependency_overrides[get_face_service] = lambda: MatchingFaceService()
+    response = client.post(
+        "/api/v1/checkins/",
+        headers=student_headers,
+        json=checkin_payload(session["id"]),
+    )
+    app.dependency_overrides.pop(get_face_service, None)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["face_match_passed"] is True
+    assert response.json()["face_match_score"] == 0.94
 
 
 def test_checkin_validation_failures_leave_no_partial_records(

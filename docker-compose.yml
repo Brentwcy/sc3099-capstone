@@ -53,6 +53,7 @@ services:
       REDIS_URL: redis://redis:6379
       SECRET_KEY: your-secret-key-change-in-production
       FACE_SERVICE_URL: http://face-recognition:8001
+      FACE_SERVICE_MODE: http
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       postgres:
@@ -82,12 +83,16 @@ services:
     build:
       context: ./module1-frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_USE_MOCK_API: "false"
     container_name: saiv-frontend
     ports:
       - "3000:3000"
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
       NEXT_PUBLIC_FACE_SERVICE_URL: http://localhost:8001
+      NEXT_PUBLIC_USE_MOCK_API: "false"
     depends_on:
       - backend
     networks:

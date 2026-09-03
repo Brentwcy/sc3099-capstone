@@ -14,7 +14,10 @@ from app.schemas.user import (
     UserResponse,
     UserSummary,
 )
+from app.schemas.face import UserFaceEnrollmentRequest
 from app.services.audit import append_audit_log
+from app.services.face_client import FaceServiceError, FaceServiceRejected
+from app.services.face_mock import FaceService, get_face_service
 
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -43,6 +46,47 @@ def update_profile(
         resource_type="user",
         resource_id=current_user.id,
         details={"changed_fields": sorted(changes)},
+    )
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@router.post("/me/face-enrollment", response_model=UserResponse)
+async def enroll_current_user_face(
+    payload: UserFaceEnrollmentRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    face_service: FaceService = Depends(get_face_service),
+) -> User:
+    if not current_user.camera_consent:
+        raise HTTPException(status_code=400, detail="Camera consent is required")
+
+    try:
+        result = await face_service.enroll_face(
+            user_id=current_user.id,
+            image=payload.image,
+            camera_consent=current_user.camera_consent,
+        )
+    except FaceServiceRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except FaceServiceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+    if not result.enrollment_successful:
+        raise HTTPException(status_code=400, detail="Face enrollment was not successful")
+
+    current_user.face_embedding_hash = result.face_template_hash
+    current_user.face_enrolled = True
+    append_audit_log(
+        db,
+        action="face_enrolled",
+        request=request,
+        user_id=current_user.id,
+        resource_type="user",
+        resource_id=current_user.id,
+        details={"quality_score": result.quality_score},
     )
     db.commit()
     db.refresh(current_user)
