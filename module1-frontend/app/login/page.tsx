@@ -13,8 +13,8 @@ import { getPasswordError, isValidEmail, normalizeEmail } from '@/lib/auth/valid
 export default function LoginPage() {
   const router = useRouter()
   const { login } = useAuth()
-  const [email, setEmail] = useState('student@ntu.edu.sg')
-  const [password, setPassword] = useState('password123')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
