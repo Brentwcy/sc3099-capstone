@@ -1,0 +1,15 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+    "python.terminal.activateEnvironment": true,
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/module2-backend",
+        "${workspaceFolder}/module3-face-recognition"
+    ],
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.reportMissingModuleSource": "none",
+    "python.analysis.reportAttributeAccessIssue": "none",
+    "python.analysis.ignore": [
+        "**/mediapipe/**",
+        "**/cv2/**"
+    ]
+}
