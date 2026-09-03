@@ -1,7 +1,8 @@
 """
 Pydantic Request and Response Models for SAIV Face Recognition & Risk Service.
 """
-from typing import Any
+from datetime import datetime
+from typing import Any, Optional
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -51,6 +52,15 @@ class LivenessRequest(BaseModel):
     """Request model for liveness check."""
     challenge_response: str = Field(..., description="Base64 encoded face image")
     challenge_type: str = Field("passive", description="passive, blink, or head_turn")
+    initial_image: Optional[str] = Field(None, description="Initial frame for active challenge comparison")
+
+    @model_validator(mode="after")
+    def validate_challenge(self):
+        if self.challenge_type not in {"passive", "blink", "head_turn"}:
+            raise ValueError("challenge_type must be passive, blink, or head_turn")
+        if self.challenge_type != "passive" and not self.initial_image:
+            raise ValueError("Active liveness challenges require an initial_image")
+        return self
 
 
 class LivenessResponse(BaseModel):
@@ -79,6 +89,9 @@ class RiskAssessRequest(BaseModel):
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
     geolocation: "GeolocationData | None" = None
+    check_in_time: Optional[datetime] = None
+    session_start_time: Optional[datetime] = None
+    session_end_time: Optional[datetime] = None
 
 
 class RiskAssessResponse(BaseModel):

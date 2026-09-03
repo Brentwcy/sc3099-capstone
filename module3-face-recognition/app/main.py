@@ -122,9 +122,9 @@ async def enroll_face(request: FaceEnrollRequest):
     quality_score, details = face_engine.calculate_quality_score(image_rgb, landmarks)
     embedding = face_engine.extract_embedding(landmarks)
     face_template_hash = face_engine.generate_face_hash(embedding)
+    simhash = face_engine.generate_simhash(embedding)
 
-    # Cache embedding for continuous similarity matching
-    cache.set_embedding(face_template_hash, embedding)
+    cache.set_template(face_template_hash, simhash)
 
     logger.info(
         "Face enrolled successfully",
@@ -176,18 +176,24 @@ async def verify_face(request: FaceVerifyRequest):
 
     current_embedding = face_engine.extract_embedding(landmarks)
     current_hash = face_engine.generate_face_hash(current_embedding)
-    cache.set_embedding(current_hash, current_embedding)
+    current_simhash = face_engine.generate_simhash(current_embedding)
+    cache.set_template(current_hash, current_simhash)
 
     if ref_hash and current_hash == ref_hash:
         match_score = 1.0
         match_passed = True
     elif ref_hash:
-        ref_embedding = cache.get_embedding(ref_hash)
-        if ref_embedding is not None:
-            match_score = face_engine.calculate_similarity(current_embedding, ref_embedding)
+        reference_simhash = cache.get_template(ref_hash)
+        if reference_simhash is not None:
+            match_score = face_engine.simhash_similarity(current_simhash, reference_simhash)
+            match_passed = face_engine.simhash_matches(
+                current_simhash,
+                reference_simhash,
+                max_distance=face_engine.SIMHASH_HAMMING_THRESHOLD,
+            )
         else:
             match_score = 0.35  # Hash mismatch fallback
-        match_passed = match_score >= settings.FACE_MATCH_THRESHOLD
+            match_passed = False
     else:
         match_score = 0.0
         match_passed = False
@@ -239,15 +245,21 @@ async def check_liveness(request: LivenessRequest):
             details={"face_detected": False}
         )
 
+    initial_landmarks = None
+    if request.initial_image:
+        initial_rgb = decode_base64_image(request.initial_image)
+        initial_landmarks = face_engine.extract_landmarks(initial_rgb) if initial_rgb is not None else None
+
     liveness_score, liveness_passed, details = liveness_engine.evaluate_liveness(
         image_rgb=image_rgb,
         landmarks=landmarks,
-        challenge_type=request.challenge_type
+        challenge_type=request.challenge_type,
+        initial_landmarks=initial_landmarks
     )
 
     embedding = face_engine.extract_embedding(landmarks)
     face_hash = face_engine.generate_face_hash(embedding)
-    cache.set_embedding(face_hash, embedding)
+    cache.set_template(face_hash, face_engine.generate_simhash(embedding))
 
     return LivenessResponse(
         liveness_passed=liveness_passed,

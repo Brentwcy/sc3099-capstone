@@ -15,10 +15,14 @@ from .logging_config import logger
 class FaceEngine:
     """Core biometric engine using MediaPipe FaceLandmarker (478 3D landmarks)."""
 
+    HASH_BITS = 128
+    SIMHASH_HAMMING_THRESHOLD = 12
+
     MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task"
 
     def __init__(self, min_detection_confidence: float = 0.5):
         self.min_detection_confidence = min_detection_confidence
+        self._simhash_planes: np.ndarray | None = None
         self.model_path = self._resolve_model_path()
         self.detector = self._init_detector()
 
@@ -157,6 +161,32 @@ class FaceEngine:
         """
         quantized = np.round(embedding * 1000).astype(np.int32).tobytes()
         return hashlib.sha256(quantized).hexdigest()
+
+    def generate_simhash(self, embedding: np.ndarray) -> str:
+        """Generate a reproducible locality-sensitive 64-bit code."""
+        if embedding is None or len(embedding) == 0:
+            return ""
+        if self._simhash_planes is None or self._simhash_planes.shape[1] != len(embedding):
+            rng = np.random.default_rng(6)
+            self._simhash_planes = rng.standard_normal((self.HASH_BITS, len(embedding)))
+        projections = self._simhash_planes @ embedding
+        return "".join("1" if projection >= 0 else "0" for projection in projections)
+
+    @staticmethod
+    def simhash_similarity(simhash1: str, simhash2: str) -> float:
+        """Convert SimHash Hamming distance to a normalized similarity score."""
+        if not simhash1 or not simhash2 or len(simhash1) != len(simhash2):
+            return 0.0
+        distance = sum(bit1 != bit2 for bit1, bit2 in zip(simhash1, simhash2))
+        return float(1.0 - distance / len(simhash1))
+
+    @staticmethod
+    def simhash_matches(simhash1: str, simhash2: str, max_distance: int = 12) -> bool:
+        """Return whether two templates are within the configured Hamming distance."""
+        if not simhash1 or not simhash2 or len(simhash1) != len(simhash2):
+            return False
+        distance = sum(bit1 != bit2 for bit1, bit2 in zip(simhash1, simhash2))
+        return distance <= max_distance
 
     def calculate_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
         """
