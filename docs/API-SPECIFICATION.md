@@ -609,7 +609,9 @@ Get current student's check-in history. **Requires auth (student).**
     "id": "uuid",
     "session_id": "uuid",
     "session_name": "Lecture 5: Neural Networks",
+    "session_type": "lecture",
     "course_code": "CS6101",
+    "course_name": "Machine Learning",
     "status": "approved",
     "checked_in_at": "2024-01-15T14:05:00Z",
     "risk_score": 0.15
@@ -892,9 +894,14 @@ Register a new device. **Requires auth.**
   "device_fingerprint": "unique_device_hash",
   "device_name": "John's iPhone",
   "platform": "ios",  // ios|android|web|desktop
+  "browser": null,     // Optional, primarily for web clients
+  "os_version": "17.6", // Optional
+  "app_version": "1.0.0", // Optional
   "public_key": "-----BEGIN PUBLIC KEY-----..."
 }
 ```
+
+A fingerprint can be bound to only one account. Re-registering an existing binding returns `400`; attempting to bind another account's fingerprint returns `409` and records a security event. New devices remain untrusted until an administrator approves them.
 
 **Response:** `201 Created`
 ```json
@@ -930,8 +937,16 @@ List current user's registered devices. **Requires auth.**
 ]
 ```
 
+#### GET /devices/
+List devices with optional `user_id`, `is_active`, `is_trusted`, `limit`, and `offset` filters. **Requires auth (admin).**
+
+#### GET /devices/{device_id}
+Get one device. **Requires auth (owner or admin).**
+
 #### DELETE /devices/{device_id}
 Remove a device. **Requires auth (owner or admin).**
+
+Removal is a soft revocation: the device becomes inactive while historical check-in bindings remain intact.
 
 **Response:** `204 No Content`
 

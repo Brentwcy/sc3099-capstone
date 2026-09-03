@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from app.models.audit_log import AuditLog
 from app.models.checkin import CheckIn, CheckInStatus
 from app.models.risk_signal import RiskSignal
 from app.models.session import AttendanceSession
@@ -143,7 +144,9 @@ def test_student_can_list_and_filter_own_checkins(
     assert item["id"] == checkin.id
     assert item["session_id"] == session.json()["id"]
     assert item["session_name"] == "History Lecture"
+    assert item["session_type"] == "lecture"
     assert item["course_code"] == "HIST101"
+    assert item["course_name"] == "Check-in History"
     assert item["status"] == "approved"
     assert datetime.fromisoformat(item["checked_in_at"].replace("Z", "+00:00")) == now
     assert item["risk_score"] == 0.15
@@ -203,6 +206,13 @@ def test_atomic_checkin_uses_mock_and_persists_risk_signals(
     assert body["distance_from_venue_meters"] == 0
     assert db_session.query(CheckIn).count() == 1
     assert db_session.query(RiskSignal).count() == 1
+    signal = db_session.query(RiskSignal).one()
+    assert signal.checkin_id == body["id"]
+    assert signal.signal_type.value == "device_unknown"
+    assert signal.weight == 0.15
+    assert db_session.query(AuditLog).filter_by(action="checkin_attempted").count() == 1
+    approved_audit = db_session.query(AuditLog).filter_by(action="checkin_approved").one()
+    assert approved_audit.resource_id == body["id"]
 
     duplicate = client.post(
         "/api/v1/checkins/",
@@ -213,6 +223,8 @@ def test_atomic_checkin_uses_mock_and_persists_risk_signals(
     assert duplicate.json() == {"detail": "Already checked in"}
     assert db_session.query(CheckIn).count() == 1
     assert db_session.query(RiskSignal).count() == 1
+    assert db_session.query(AuditLog).filter_by(action="checkin_attempted").count() == 2
+    assert db_session.query(AuditLog).filter_by(action="checkin_approved").count() == 1
 
 
 def test_checkin_validation_failures_leave_no_partial_records(
@@ -361,6 +373,85 @@ def test_session_and_detail_queries_enforce_ownership(
         f"/api/v1/checkins/session/{session['id']}",
         headers=student_headers,
     ).status_code == 403
+
+    filtered = client.get(
+        "/api/v1/checkins/",
+        headers=instructor_headers,
+        params={
+            "session_id": session["id"],
+            "status": "approved",
+            "min_risk_score": 0.1,
+            "max_risk_score": 0.2,
+        },
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["items"][0]["id"] == checkin_id
+    assert filtered.json()["items"][0]["student_email"]
+    assert client.get("/api/v1/checkins/", headers=student_headers).status_code == 403
+
+
+def test_reused_device_fingerprint_is_flagged_and_audited(
+    client,
+    db_session,
+    student,
+    instructor,
+    admin,
+):
+    student_user, student_headers = student
+    instructor_user, instructor_headers = instructor
+    _admin_user, admin_headers = admin
+    _course, session = create_checkin_setup(
+        client,
+        student_user=student_user,
+        student_headers=student_headers,
+        instructor_user=instructor_user,
+        instructor_headers=instructor_headers,
+        admin_headers=admin_headers,
+    )
+
+    other_payload = {
+        "email": "week5-device-owner@example.com",
+        "password": "testpassword123",
+        "full_name": "Device Owner",
+        "role": "student",
+    }
+    assert client.post("/api/v1/auth/register", json=other_payload).status_code == 201
+    token = client.post(
+        "/api/v1/auth/login",
+        json={"email": other_payload["email"], "password": other_payload["password"]},
+    ).json()["access_token"]
+    other_headers = {"Authorization": f"Bearer {token}"}
+    registered = client.post(
+        "/api/v1/devices/register",
+        headers=other_headers,
+        json={
+            "device_fingerprint": "cross-account-week5-device",
+            "platform": "web",
+            "public_key": "public-key-material-that-is-long-enough-for-validation",
+        },
+    )
+    assert registered.status_code == 201, registered.text
+
+    response = client.post(
+        "/api/v1/checkins/",
+        headers=student_headers,
+        json=checkin_payload(
+            session["id"], device_fingerprint="cross-account-week5-device"
+        ),
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "flagged"
+    anomaly = next(
+        factor
+        for factor in response.json()["risk_factors"]
+        if factor["type"] == "pattern_anomaly"
+    )
+    assert anomaly["details"]["reason"] == "device_fingerprint_bound_to_another_account"
+    assert response.json()["risk_score"] >= 0.5
+    violation = db_session.query(AuditLog).filter_by(action="security_violation").one()
+    assert violation.resource_id == response.json()["id"]
+    assert violation.success is False
 
 
 def test_non_enrollment_closed_window_and_lateness(

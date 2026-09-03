@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.models.checkin import CheckInStatus
 from app.models.risk_signal import RiskSeverity, RiskSignalType
+from app.models.session import SessionType
 
 
 class CheckInCreate(BaseModel):
@@ -80,11 +81,34 @@ class SessionCheckInResponse(BaseModel):
     device_trusted: bool | None
 
 
+class CheckInListItemResponse(BaseModel):
+    id: str
+    session_id: str
+    session_name: str
+    student_id: str
+    student_name: str
+    student_email: str
+    status: CheckInStatus
+    checked_in_at: datetime
+    distance_from_venue_meters: float | None
+    risk_score: float
+    liveness_passed: bool | None
+
+
+class PaginatedCheckIns(BaseModel):
+    items: list[CheckInListItemResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 class MyCheckInResponse(BaseModel):
     id: str
     session_id: str
     session_name: str
+    session_type: SessionType
     course_code: str
+    course_name: str
     status: CheckInStatus
     checked_in_at: datetime
     risk_score: float

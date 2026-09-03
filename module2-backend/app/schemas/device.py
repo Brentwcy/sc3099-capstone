@@ -9,6 +9,9 @@ class DeviceRegister(BaseModel):
     device_fingerprint: str = Field(min_length=8, max_length=64)
     device_name: str | None = Field(default=None, max_length=255)
     platform: DevicePlatform | None = None
+    browser: str | None = Field(default=None, max_length=100)
+    os_version: str | None = Field(default=None, max_length=50)
+    app_version: str | None = Field(default=None, max_length=50)
     public_key: str = Field(min_length=32, max_length=16_384)
 
     @field_validator("device_fingerprint")
@@ -18,6 +21,12 @@ class DeviceRegister(BaseModel):
         if any(character.isspace() for character in value):
             raise ValueError("Device fingerprint cannot contain whitespace")
         return value
+
+
+class LegacyDeviceRegister(DeviceRegister):
+    """Compatibility shape for the original public fixture's `/devices/` route."""
+
+    public_key: str | None = Field(default=None, min_length=32, max_length=16_384)
 
 
 class DeviceUpdate(BaseModel):
@@ -44,3 +53,10 @@ class DeviceResponse(BaseModel):
     total_checkins: int
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PaginatedDevices(BaseModel):
+    items: list[DeviceResponse]
+    total: int
+    limit: int
+    offset: int

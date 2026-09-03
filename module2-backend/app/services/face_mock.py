@@ -1,31 +1,33 @@
 from functools import lru_cache
-from typing import Protocol
 
-from pydantic import BaseModel, Field
+from fastapi import Depends
 
-
-class LivenessResult(BaseModel):
-    """Subset of the documented Module 3 /liveness/check response."""
-
-    liveness_passed: bool | None
-    liveness_score: float = Field(ge=0, le=1)
-    liveness_threshold: float = Field(default=0.6, ge=0, le=1)
-    challenge_type: str = "passive"
-    face_embedding_hash: str | None = None
-    details: dict[str, object] = Field(default_factory=dict)
-
-
-class FaceService(Protocol):
-    async def check_liveness(
-        self,
-        *,
-        challenge_response: str,
-        challenge_type: str = "passive",
-    ) -> LivenessResult: ...
-
+from app.core.config import Settings, get_settings
+from app.schemas.face import FaceEnrollResult, FaceVerifyResult, LivenessResult
+from app.services.face_client import FaceService, HttpFaceService
 
 class ContractCompatibleFaceServiceMock:
     """Deterministic Week 4 stand-in; it never persists or logs image data."""
+
+    async def enroll_face(
+        self, *, user_id: str, image: str, camera_consent: bool
+    ) -> FaceEnrollResult:
+        return FaceEnrollResult(
+            enrollment_successful=camera_consent,
+            face_template_hash=None,
+            quality_score=0.92,
+            details={"provider": "module3-contract-mock"},
+        )
+
+    async def verify_face(
+        self, *, image: str, reference_template_hash: str
+    ) -> FaceVerifyResult:
+        return FaceVerifyResult(
+            match_passed=True,
+            match_score=0.92,
+            match_threshold=0.7,
+            face_detected=True,
+        )
 
     async def check_liveness(
         self,
@@ -43,5 +45,30 @@ class ContractCompatibleFaceServiceMock:
 
 
 @lru_cache
-def get_face_service() -> ContractCompatibleFaceServiceMock:
+def get_mock_face_service() -> ContractCompatibleFaceServiceMock:
     return ContractCompatibleFaceServiceMock()
+
+
+_http_face_service: HttpFaceService | None = None
+
+
+def get_face_service(
+    settings: Settings = Depends(get_settings),
+) -> FaceService:
+    global _http_face_service
+    if settings.face_service_mode == "mock":
+        return get_mock_face_service()
+    if _http_face_service is None:
+        _http_face_service = HttpFaceService(
+            base_url=settings.face_service_url,
+            connect_timeout_seconds=settings.face_connect_timeout_seconds,
+            read_timeout_seconds=settings.face_read_timeout_seconds,
+        )
+    return _http_face_service
+
+
+async def close_face_service() -> None:
+    global _http_face_service
+    if _http_face_service is not None:
+        await _http_face_service.aclose()
+        _http_face_service = None

@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
     bcrypt_rounds: int = Field(default=12, ge=10, le=16)
     cors_origins: str = "http://localhost:3000,http://localhost:8501"
+    face_service_mode: str = "mock"
+    face_service_url: str = "http://localhost:8001"
+    face_connect_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
+    face_read_timeout_seconds: float = Field(default=8.0, gt=0, le=60)
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -30,6 +34,14 @@ class Settings(BaseSettings):
     def validate_secret_key(cls, value: str) -> str:
         if len(value) < 32:
             raise ValueError("SECRET_KEY must contain at least 32 characters")
+        return value
+
+    @field_validator("face_service_mode")
+    @classmethod
+    def validate_face_service_mode(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"mock", "http"}:
+            raise ValueError("FACE_SERVICE_MODE must be 'mock' or 'http'")
         return value
 
     @property

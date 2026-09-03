@@ -1,12 +1,12 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_current_user, require_roles
+from app.api.dependencies import get_current_user, require_instructor_or_admin, require_roles
 from app.core.database import get_db
 from app.models.checkin import CheckIn, CheckInStatus
 from app.models.course import Course
@@ -18,8 +18,10 @@ from app.models.user import User, UserRole
 from app.schemas.checkin import (
     CheckInCreate,
     CheckInDetailResponse,
+    CheckInListItemResponse,
     CheckInResponse,
     MyCheckInResponse,
+    PaginatedCheckIns,
     RiskFactorResponse,
     SessionCheckInResponse,
 )
@@ -29,6 +31,8 @@ from app.services.checkin import (
     initial_risk_score,
 )
 from app.services.face_mock import FaceService, get_face_service
+from app.services.audit import append_audit_log
+from app.services.face_client import FaceServiceError, FaceServiceRejected
 
 
 router = APIRouter(prefix="/checkins", tags=["Check-ins"])
@@ -109,10 +113,27 @@ def require_session_reader(current_user: User, session: AttendanceSession) -> No
 @router.post("/", response_model=CheckInResponse, status_code=status.HTTP_201_CREATED)
 async def create_checkin(
     payload: CheckInCreate,
+    request: Request,
     student: User = Depends(require_roles(UserRole.student)),
     db: Session = Depends(get_db),
     face_service: FaceService = Depends(get_face_service),
 ) -> CheckInResponse:
+    append_audit_log(
+        db,
+        action="checkin_attempted",
+        request=request,
+        user_id=student.id,
+        resource_type="session",
+        resource_id=payload.session_id,
+        details={
+            "session_id": payload.session_id,
+            "latitude": payload.latitude,
+            "longitude": payload.longitude,
+        },
+    )
+    # Attempts must remain in the audit trail even when later validation rejects them.
+    db.commit()
+
     attendance_session = db.get(AttendanceSession, payload.session_id)
     if attendance_session is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -155,15 +176,30 @@ async def create_checkin(
     if course is None or not course.is_active:
         raise HTTPException(status_code=400, detail="Course is not active")
 
-    device = db.scalar(
-        select(Device).where(
-            Device.device_fingerprint == payload.device_fingerprint,
-            Device.user_id == student.id,
-            Device.is_active.is_(True),
-        )
+    fingerprinted_device = db.scalar(
+        select(Device).where(Device.device_fingerprint == payload.device_fingerprint)
+    )
+    device = (
+        fingerprinted_device
+        if fingerprinted_device is not None
+        and fingerprinted_device.user_id == student.id
+        and fingerprinted_device.is_active
+        else None
     )
     factors: list[InitialRiskFactor] = []
-    if device is None:
+    reused_device = bool(
+        fingerprinted_device is not None and fingerprinted_device.user_id != student.id
+    )
+    if reused_device:
+        factors.append(
+            InitialRiskFactor(
+                RiskSignalType.pattern_anomaly,
+                RiskSeverity.high,
+                0.50,
+                details={"reason": "device_fingerprint_bound_to_another_account"},
+            )
+        )
+    elif device is None:
         factors.append(
             InitialRiskFactor(
                 RiskSignalType.device_unknown,
@@ -257,10 +293,15 @@ async def create_checkin(
 
     liveness_result = None
     if payload.liveness_challenge_response is not None:
-        liveness_result = await face_service.check_liveness(
-            challenge_response=payload.liveness_challenge_response,
-            challenge_type="passive",
-        )
+        try:
+            liveness_result = await face_service.check_liveness(
+                challenge_response=payload.liveness_challenge_response,
+                challenge_type="passive",
+            )
+        except FaceServiceRejected as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except FaceServiceError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
         if liveness_result.liveness_passed is False:
             factors.append(
                 InitialRiskFactor(
@@ -355,6 +396,31 @@ async def create_checkin(
         if device is not None:
             device.last_seen_at = now
             device.total_checkins += 1
+        append_audit_log(
+            db,
+            action=f"checkin_{result_status.value}",
+            request=request,
+            user_id=student.id,
+            resource_type="checkin",
+            resource_id=checkin.id,
+            device_id=device.id if device is not None else None,
+            details={
+                "session_id": attendance_session.id,
+                "risk_score": risk_score,
+            },
+        )
+        if reused_device:
+            append_audit_log(
+                db,
+                action="security_violation",
+                request=request,
+                user_id=student.id,
+                resource_type="checkin",
+                resource_id=checkin.id,
+                device_id=fingerprinted_device.id if fingerprinted_device else None,
+                details={"violation_type": "device_fingerprint_reuse"},
+                success=False,
+            )
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -366,6 +432,88 @@ async def create_checkin(
     )
 
 
+@router.get("/", response_model=PaginatedCheckIns)
+def list_checkins(
+    session_id: str | None = None,
+    course_id: str | None = None,
+    student_id: str | None = None,
+    checkin_status: CheckInStatus | None = Query(default=None, alias="status"),
+    min_risk_score: float | None = Query(default=None, ge=0, le=1),
+    max_risk_score: float | None = Query(default=None, ge=0, le=1),
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(require_instructor_or_admin),
+    db: Session = Depends(get_db),
+) -> PaginatedCheckIns:
+    if (
+        min_risk_score is not None
+        and max_risk_score is not None
+        and min_risk_score > max_risk_score
+    ):
+        raise HTTPException(status_code=422, detail="Minimum risk score cannot exceed maximum")
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise HTTPException(status_code=422, detail="Start date cannot be after end date")
+
+    filters = []
+    if current_user.role == UserRole.instructor:
+        filters.append(AttendanceSession.instructor_id == current_user.id)
+    for column, value in (
+        (CheckIn.session_id, session_id),
+        (AttendanceSession.course_id, course_id),
+        (CheckIn.student_id, student_id),
+        (CheckIn.status, checkin_status),
+    ):
+        if value is not None:
+            filters.append(column == value)
+    if min_risk_score is not None:
+        filters.append(CheckIn.risk_score >= min_risk_score)
+    if max_risk_score is not None:
+        filters.append(CheckIn.risk_score <= max_risk_score)
+    if start_date is not None:
+        filters.append(CheckIn.checked_in_at >= start_date)
+    if end_date is not None:
+        filters.append(CheckIn.checked_in_at <= end_date)
+
+    joined = (
+        select(CheckIn, AttendanceSession.name, User)
+        .join(AttendanceSession, AttendanceSession.id == CheckIn.session_id)
+        .join(User, User.id == CheckIn.student_id)
+        .where(*filters)
+    )
+    total = db.scalar(
+        select(func.count())
+        .select_from(CheckIn)
+        .join(AttendanceSession, AttendanceSession.id == CheckIn.session_id)
+        .where(*filters)
+    ) or 0
+    rows = db.execute(
+        joined.order_by(CheckIn.checked_in_at.desc()).limit(limit).offset(offset)
+    ).all()
+    return PaginatedCheckIns(
+        items=[
+            CheckInListItemResponse(
+                id=checkin.id,
+                session_id=checkin.session_id,
+                session_name=session_name,
+                student_id=checkin.student_id,
+                student_name=student.full_name,
+                student_email=student.email,
+                status=checkin.status,
+                checked_in_at=checkin.checked_in_at,
+                distance_from_venue_meters=checkin.distance_from_venue_meters,
+                risk_score=checkin.risk_score,
+                liveness_passed=checkin.liveness_passed,
+            )
+            for checkin, session_name, student in rows
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
 @router.get("/my-checkins", response_model=list[MyCheckInResponse])
 def list_my_checkins(
     course_id: str | None = None,
@@ -374,7 +522,13 @@ def list_my_checkins(
     db: Session = Depends(get_db),
 ) -> list[MyCheckInResponse]:
     query = (
-        select(CheckIn, AttendanceSession.name, Course.code)
+        select(
+            CheckIn,
+            AttendanceSession.name,
+            AttendanceSession.session_type,
+            Course.code,
+            Course.name,
+        )
         .join(AttendanceSession, AttendanceSession.id == CheckIn.session_id)
         .join(Course, Course.id == AttendanceSession.course_id)
         .where(CheckIn.student_id == student.id)
@@ -388,12 +542,14 @@ def list_my_checkins(
             id=checkin.id,
             session_id=checkin.session_id,
             session_name=session_name,
+            session_type=session_type,
             course_code=course_code,
+            course_name=course_name,
             status=checkin.status,
             checked_in_at=checkin.checked_in_at,
             risk_score=checkin.risk_score,
         )
-        for checkin, session_name, course_code in rows
+        for checkin, session_name, session_type, course_code, course_name in rows
     ]
 
 

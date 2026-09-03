@@ -1,6 +1,6 @@
 # Endpoint Tracker
 
-Statuses reflect the Week 1–4 Maanya scope as of 2026-08-27. Implementation and focused verification are complete; entries remain in review until the required peer review is recorded. Later-week endpoints remain outside this implementation.
+Statuses reflect the Week 1–5 Maanya scope as of 2026-09-03. Implementation and focused verification are complete; entries remain in review until the required peer review is recorded. Later-week endpoints remain outside this implementation.
 
 | Area | Method and path | Roles | Request | Success | Errors | Audit event | Owner | Tests | Status |
 |---|---|---|---|---|---|---|---|---|---|
@@ -34,10 +34,18 @@ Statuses reflect the Week 1–4 Maanya scope as of 2026-08-27. Implementation an
 | Sessions | `POST /api/v1/sessions/` | Instructor | Course, schedule, check-in window, venue/security overrides | `201` scheduled session | `401`, `403`, `404`, `422`, `429` | `session_created` | Maanya | `test_unassigned_course_is_claimed_and_session_transitions_are_enforced`, public session tests | Review |
 | Sessions | `PATCH /api/v1/sessions/{session_id}` | Session owner | Partial fields or valid status transition | `200` session | `400`, `401`, `403`, `404`, `422`, `429` | `session_updated` | Maanya | Session transition and public update tests | Review |
 | Sessions | `DELETE /api/v1/sessions/{session_id}` | Session owner | Scheduled session ID | `204` | `400`, `401`, `403`, `404`, `429` | `session_deleted` | Maanya | Session lifecycle tests | Review |
-| Check-ins | `POST /api/v1/checkins/` | Student | Session, coordinates/accuracy, device fingerprint, optional liveness/QR | `201` approved, flagged, or rejected result | `400`, `401`, `403`, `404`, `422`, `429` | Scheduled Week 5 | Maanya | `test_atomic_checkin_uses_mock_and_persists_risk_signals`, validation/geofence/liveness/lateness tests | Review |
+| Check-ins | `POST /api/v1/checkins/` | Student | Session, coordinates/accuracy, device fingerprint, optional liveness/QR | `201` approved, flagged, or rejected result | `400`, `401`, `403`, `404`, `422`, `429`, `503` | `checkin_attempted`, outcome event, possible `security_violation` | Maanya | `test_atomic_checkin_uses_mock_and_persists_risk_signals`, validation/geofence/liveness/lateness/reuse tests | Review |
+| Check-ins | `GET /api/v1/checkins/` | Owner instructor, admin | Session/course/student/status/risk/date filters and paging | `200` privacy-safe paginated check-ins | `401`, `403`, `422`, `429` | N/A | Maanya | `test_session_and_detail_queries_enforce_ownership` | Review |
 | Check-ins | `GET /api/v1/checkins/my-checkins` | Student | Optional course and limit filters | `200` own check-in history | `401`, `403`, `422`, `429` | N/A | Maanya | `test_student_can_list_and_filter_own_checkins`, `test_my_checkins_requires_a_student_account` | Review |
 | Check-ins | `GET /api/v1/checkins/session/{session_id}` | TA, owner instructor, admin | Session ID | `200` session check-in list | `401`, `403`, `404`, `429` | N/A | Maanya | `test_session_and_detail_queries_enforce_ownership` | Review |
 | Check-ins | `GET /api/v1/checkins/{checkin_id}` | Owner student, TA, owner instructor, admin | Check-in ID | `200` full privacy-safe detail | `401`, `403`, `404`, `429` | N/A | Maanya | `test_session_and_detail_queries_enforce_ownership` | Review |
+| Devices | `POST /api/v1/devices/register` | Authenticated | Fingerprint, name/platform metadata, public key | `201` untrusted device binding | `400`, `401`, `409`, `422`, `429` | `device_registered` or `security_violation` | Maanya | `test_device_registration_and_owner_listing`, reuse tests | Review |
+| Devices | `GET /api/v1/devices/my-devices` | Authenticated | Bearer token | `200` own device list | `401`, `403`, `429` | N/A | Maanya | Device ownership tests, public device fixture | Review |
+| Devices | `GET /api/v1/devices/` | Admin | Active/trust/user filters and paging | `200` paginated devices | `401`, `403`, `422`, `429` | N/A | Maanya | `test_admin_can_filter_all_devices` | Review |
+| Devices | `GET /api/v1/devices/{device_id}` | Owner or admin | Device ID | `200` device | `401`, `403`, `404`, `429` | N/A | Maanya | Device ownership tests | Review |
+| Devices | `PATCH /api/v1/devices/{device_id}` | Owner or admin; trust admin-only | Name, active state, or trust state | `200` device | `401`, `403`, `404`, `422`, `429` | `device_updated` | Maanya | `test_device_ownership_admin_trust_and_revocation` | Review |
+| Devices | `DELETE /api/v1/devices/{device_id}` | Owner or admin | Device ID | `204` soft revocation | `401`, `403`, `404`, `429` | `device_revoked` | Maanya | `test_device_ownership_admin_trust_and_revocation` | Review |
+| Statistics | `GET /api/v1/stats/sessions/{session_id}` | TA, owner instructor, admin | Session ID | `200` attendance/risk summary | `401`, `403`, `404`, `429` | N/A | Maanya | `test_session_attendance_summary_and_authorization` | Review |
 | Admin | `PATCH /api/v1/admin/sessions/{session_id}/status` | Admin | Test/setup status override | `200` state/message | `401`, `403`, `404`, `422`, `429` | `session_status_changed` | Maanya | `test_active_session_listing_respects_checkin_window`, public fixtures | Review |
 | Admin | `POST /api/v1/admin/enrollments/` | Admin | Student and course IDs | `201` enrollment | `400`, `401`, `403`, `404`, `422`, `429` | `enrollment_created` | Maanya | Enrollment lifecycle and public fixtures | Review |
 
@@ -48,7 +56,6 @@ Notes:
 - The current official API and security specifications define JWT expiry but do not require a refresh-token store or server-side token revocation. Logout records the required immutable audit event; clients discard their local tokens.
 - An instructor may atomically claim an unassigned course when performing the first instructor-owned mutation. Once assigned, cross-instructor access is denied.
 - The specification defines TA roster reads but no TA/course assignment resource. TAs therefore receive the documented roster read permission only; all enrollment writes remain restricted to admins and the course instructor.
-- Week 3 also establishes the `devices` model, constraints, migration, and request/response schemas. Device routes remain intentionally scheduled for Week 5 and are not marked as implemented here.
-- Week 4 treats an unknown device as the documented `device_unknown` risk signal rather than registering it implicitly. Device registration, binding, and suspicious-reuse behavior remain in Week 5.
-- Week 4 uses a dependency-injectable, contract-shaped Module 3 liveness mock. The reusable async HTTP client and real service integration remain in Weeks 5–6.
-- Check-in attempt/outcome audit events are explicitly scheduled for Week 5 in `plan.md`; Week 4 keeps the check-in record and all associated risk-signal rows in one commit.
+- Device deletion is a soft revocation so prior check-ins and security history retain their binding. A fingerprint bound to another account is blocked at registration and becomes a high-risk `pattern_anomaly` plus `security_violation` if submitted during check-in.
+- The Module 3 client supports reusable mock and HTTP modes. `docs/M2-M3-CONTRACT.md` is a candidate freeze until the Module 3 owner reviews it; real-service activation remains Week 6 work.
+- Check-in attempts are committed to the immutable audit trail before business validation. Successful check-in records, risk-signal rows, and outcome/security audit events are committed atomically.

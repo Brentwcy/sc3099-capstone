@@ -21,6 +21,7 @@ def append_audit_log(
     user_id: str | None = None,
     resource_type: str | None = None,
     resource_id: str | None = None,
+    device_id: str | None = None,
     details: dict[str, Any] | None = None,
     success: bool = True,
 ) -> AuditLog:
@@ -32,6 +33,7 @@ def append_audit_log(
         action=action,
         resource_type=resource_type,
         resource_id=resource_id,
+        device_id=device_id,
         ip_address=ip_address,
         user_agent=user_agent,
         details=json.dumps(details, separators=(",", ":"), sort_keys=True) if details else None,
