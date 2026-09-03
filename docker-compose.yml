@@ -55,9 +55,6 @@ services:
       FACE_SERVICE_URL: http://face-recognition:8001
       FACE_SERVICE_MODE: http
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      # Local test runners share one IP. Production defaults remain 10/60.
-      REGISTRATION_RATE_LIMIT_PER_HOUR: "100"
-      LOGIN_RATE_LIMIT_PER_HOUR: "100"
     depends_on:
       postgres:
         condition: service_healthy

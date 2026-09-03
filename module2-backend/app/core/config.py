@@ -21,8 +21,6 @@ class Settings(BaseSettings):
     face_service_url: str = "http://localhost:8001"
     face_connect_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
     face_read_timeout_seconds: float = Field(default=8.0, gt=0, le=60)
-    registration_rate_limit_per_hour: int = Field(default=10, ge=1)
-    login_rate_limit_per_hour: int = Field(default=60, ge=1)
 
     model_config = SettingsConfigDict(
         env_file=".env",
