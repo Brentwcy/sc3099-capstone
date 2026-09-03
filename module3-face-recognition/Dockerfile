@@ -2,13 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for OpenCV and face_recognition
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    libopencv-dev \
+# Install system dependencies for OpenCV and MediaPipe
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
+    libegl1 \
+    libgles2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
