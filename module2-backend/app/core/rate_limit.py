@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 from hashlib import sha256
-from typing import Protocol
+from typing import Callable, Protocol
 
 from fastapi import Depends, HTTPException, Request, status
 from redis import Redis
@@ -19,11 +19,25 @@ class RateLimitPolicy:
     window_seconds: int
 
 
-LOGIN_RATE_LIMIT = RateLimitPolicy(name="login", limit=60, window_seconds=60 * 60)
-REGISTRATION_RATE_LIMIT = RateLimitPolicy(
-    name="registration", limit=10, window_seconds=60 * 60
-)
 AUTHENTICATED_API_RATE_LIMIT = RateLimitPolicy(name="api", limit=1_000, window_seconds=60 * 60)
+
+
+def get_registration_rate_limit() -> RateLimitPolicy:
+    """Use the configured limit; Settings preserves the 10/hour production default."""
+    return RateLimitPolicy(
+        name="registration",
+        limit=get_settings().registration_rate_limit_per_hour,
+        window_seconds=60 * 60,
+    )
+
+
+def get_login_rate_limit() -> RateLimitPolicy:
+    """Use the configured limit; Settings preserves the 60/hour production default."""
+    return RateLimitPolicy(
+        name="login",
+        limit=get_settings().login_rate_limit_per_hour,
+        window_seconds=60 * 60,
+    )
 
 
 class RateLimiter(Protocol):
@@ -109,22 +123,22 @@ def check_rate_limit(
         )
 
 
-def enforce_rate_limit(policy: RateLimitPolicy):
+def enforce_rate_limit(policy_factory: Callable[[], RateLimitPolicy]):
     def dependency(
         request: Request,
         limiter: RateLimiter = Depends(get_rate_limiter),
     ) -> None:
         check_rate_limit(
             limiter=limiter,
-            policy=policy,
+            policy=policy_factory(),
             identifier=client_identifier(request),
         )
 
     return dependency
 
 
-enforce_login_rate_limit = enforce_rate_limit(LOGIN_RATE_LIMIT)
-enforce_registration_rate_limit = enforce_rate_limit(REGISTRATION_RATE_LIMIT)
+enforce_login_rate_limit = enforce_rate_limit(get_login_rate_limit)
+enforce_registration_rate_limit = enforce_rate_limit(get_registration_rate_limit)
 
 
 def redis_is_ready() -> bool:
