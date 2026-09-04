@@ -13,8 +13,8 @@ import { getPasswordError, isValidEmail, normalizeEmail } from '@/lib/auth/valid
 export default function LoginPage() {
   const router = useRouter()
   const { login } = useAuth()
-  const [email, setEmail] = useState('student@ntu.edu.sg')
-  const [password, setPassword] = useState('password123')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -59,10 +59,6 @@ export default function LoginPage() {
           <p className="mt-4 leading-7 text-slate-600">
             Sign in to view active sessions and begin a secure attendance check-in.
           </p>
-          <div className="mt-8 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-            <p className="font-semibold">Mock mode is active</p>
-            <p className="mt-1">The pre-filled credentials demonstrate the typed authentication flow.</p>
-          </div>
         </section>
 
         <form className="card" onSubmit={handleSubmit} noValidate>
