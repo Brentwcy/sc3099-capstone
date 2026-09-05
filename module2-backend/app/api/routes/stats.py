@@ -24,15 +24,8 @@ def as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def require_summary_access(
-    current_user: User, attendance_session: AttendanceSession
-) -> None:
-    if current_user.role in {UserRole.admin, UserRole.ta}:
-        return
-    if (
-        current_user.role == UserRole.instructor
-        and attendance_session.instructor_id == current_user.id
-    ):
+def require_summary_access(current_user: User) -> None:
+    if current_user.role in {UserRole.admin, UserRole.ta, UserRole.instructor}:
         return
     raise HTTPException(status_code=403, detail="Insufficient permissions")
 
@@ -51,7 +44,7 @@ def session_attendance_summary(
     if row is None:
         raise HTTPException(status_code=404, detail="Session not found")
     attendance_session, course_code = row
-    require_summary_access(current_user, attendance_session)
+    require_summary_access(current_user)
 
     total_enrolled = (
         db.scalar(

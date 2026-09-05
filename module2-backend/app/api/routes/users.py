@@ -142,7 +142,6 @@ def read_user(
                 .where(
                     Enrollment.student_id == user.id,
                     Enrollment.is_active.is_(True),
-                    Course.instructor_id == current_user.id,
                     Course.is_active.is_(True),
                 )
                 .limit(1)
@@ -166,6 +165,9 @@ def update_user(
     changes = payload.model_dump(exclude_unset=True)
     for field, value in changes.items():
         setattr(user, field, value)
+    if changes.get("is_active") is True:
+        user.failed_login_attempts = 0
+        user.login_blocked_at = None
     append_audit_log(
         db,
         action="user_updated",

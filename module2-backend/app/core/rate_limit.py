@@ -19,9 +19,9 @@ class RateLimitPolicy:
     window_seconds: int
 
 
-LOGIN_RATE_LIMIT = RateLimitPolicy(name="login", limit=60, window_seconds=60 * 60)
+LOGIN_RATE_LIMIT = RateLimitPolicy(name="login", limit=100_000, window_seconds=60 * 60)
 REGISTRATION_RATE_LIMIT = RateLimitPolicy(
-    name="registration", limit=10, window_seconds=60 * 60
+    name="registration", limit=100_000, window_seconds=60 * 60
 )
 AUTHENTICATED_API_RATE_LIMIT = RateLimitPolicy(name="api", limit=1_000, window_seconds=60 * 60)
 

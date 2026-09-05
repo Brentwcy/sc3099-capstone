@@ -23,6 +23,7 @@ from app.services.audit import append_audit_log
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+MAX_CONSECUTIVE_FAILED_LOGINS = 10
 
 
 def token_pair_for(user: User) -> TokenPair:
@@ -72,8 +73,36 @@ def register(payload: UserCreate, request: Request, db: Session = Depends(get_db
 )
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> LoginResponse:
     email = str(payload.email).strip().lower()
-    user = db.scalar(select(User).where(User.email == email))
-    if user is None or not verify_password(payload.password, user.hashed_password):
+    user = db.scalar(select(User).where(User.email == email).with_for_update())
+    if user is not None and user.login_blocked_at is not None:
+        append_audit_log(
+            db,
+            action="login_failed",
+            request=request,
+            user_id=user.id,
+            resource_type="user",
+            resource_id=user.id,
+            details={"email": email, "reason": "account_blocked"},
+            success=False,
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Account blocked after too many failed login attempts",
+        )
+
+    password_matches = user is not None and verify_password(
+        payload.password, user.hashed_password
+    )
+    if user is None or not password_matches:
+        blocked_now = False
+        failed_attempts = None
+        if user is not None:
+            user.failed_login_attempts += 1
+            failed_attempts = user.failed_login_attempts
+            if user.failed_login_attempts >= MAX_CONSECUTIVE_FAILED_LOGINS:
+                user.login_blocked_at = datetime.now(timezone.utc)
+                blocked_now = True
         append_audit_log(
             db,
             action="login_failed",
@@ -81,11 +110,19 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
             user_id=user.id if user else None,
             resource_type="user",
             resource_id=user.id if user else None,
-            details={"email": email, "reason": "invalid_credentials"},
+            details={
+                "email": email,
+                "reason": "invalid_credentials",
+                "consecutive_failed_attempts": failed_attempts,
+                "account_blocked": blocked_now,
+            },
             success=False,
         )
         db.commit()
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if user.failed_login_attempts:
+        user.failed_login_attempts = 0
     if not user.is_active:
         append_audit_log(
             db,

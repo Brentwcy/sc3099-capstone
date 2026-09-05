@@ -4,7 +4,13 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import select
 
-from app.core.rate_limit import RedisRateLimiter, RateLimitPolicy, get_rate_limiter
+from app.core.rate_limit import (
+    LOGIN_RATE_LIMIT,
+    REGISTRATION_RATE_LIMIT,
+    RedisRateLimiter,
+    RateLimitPolicy,
+    get_rate_limiter,
+)
 from app.core.security import create_token
 from app.main import app
 from app.models.audit_log import AuditLog
@@ -211,29 +217,85 @@ def test_non_admin_receives_exact_403_for_admin_endpoint(client, student):
 
 
 def test_login_rate_limit_returns_exact_429_contract(client):
-    payload = {"email": "missing@example.com", "password": "wrongpassword"}
-    for _ in range(60):
-        response = client.post("/api/v1/auth/login", json=payload)
-        assert response.status_code == 401
+    class LimitedLoginRateLimiter:
+        def consume(self, *, policy, identifier):
+            return 3600 if policy.name == "login" else None
 
+    app.dependency_overrides[get_rate_limiter] = lambda: LimitedLoginRateLimiter()
+    payload = {"email": "missing@example.com", "password": "wrongpassword"}
     limited = client.post("/api/v1/auth/login", json=payload)
     assert limited.status_code == 429
     assert limited.json() == {"detail": "Rate limit exceeded"}
-    assert int(limited.headers["retry-after"]) > 0
+    assert limited.headers["retry-after"] == "3600"
+
+
+def test_consecutive_password_failures_block_account_until_admin_activation(
+    client, db_session, student, admin
+):
+    student_user, _student_headers = student
+    _admin_user, admin_headers = admin
+    invalid_payload = {
+        "email": student_user["email"],
+        "password": "wrongpassword",
+    }
+
+    for _ in range(10):
+        response = client.post("/api/v1/auth/login", json=invalid_payload)
+        assert response.status_code == 401
+        assert response.json() == {"detail": "Invalid credentials"}
+
+    db_session.expire_all()
+    stored = db_session.scalar(select(User).where(User.id == student_user["id"]))
+    assert stored.failed_login_attempts == 10
+    assert stored.login_blocked_at is not None
+
+    blocked = client.post(
+        "/api/v1/auth/login",
+        json={"email": student_user["email"], "password": "testpassword123"},
+    )
+    assert blocked.status_code == 429
+    assert blocked.json() == {
+        "detail": "Account blocked after too many failed login attempts"
+    }
+
+    activated = client.patch(
+        f"/api/v1/admin/users/{student_user['id']}/activate",
+        headers=admin_headers,
+    )
+    assert activated.status_code == 200
+    db_session.expire_all()
+    assert stored.failed_login_attempts == 0
+    assert stored.login_blocked_at is None
+    assert client.post(
+        "/api/v1/auth/login",
+        json={"email": student_user["email"], "password": "testpassword123"},
+    ).status_code == 200
+
+
+def test_successful_login_resets_consecutive_password_failures(client, db_session, student):
+    student_user, _headers = student
+    assert client.post(
+        "/api/v1/auth/login",
+        json={"email": student_user["email"], "password": "wrongpassword"},
+    ).status_code == 401
+
+    successful = client.post(
+        "/api/v1/auth/login",
+        json={"email": student_user["email"], "password": "testpassword123"},
+    )
+    assert successful.status_code == 200
+    db_session.expire_all()
+    stored = db_session.scalar(select(User).where(User.id == student_user["id"]))
+    assert stored.failed_login_attempts == 0
+    assert stored.login_blocked_at is None
 
 
 def test_registration_rate_limit_returns_exact_429_contract(client):
-    for index in range(10):
-        response = client.post(
-            "/api/v1/auth/register",
-            json={
-                "email": f"limited-{index}@example.com",
-                "password": "testpassword123",
-                "full_name": f"Limited User {index}",
-            },
-        )
-        assert response.status_code == 201
+    class LimitedRegistrationRateLimiter:
+        def consume(self, *, policy, identifier):
+            return 3600 if policy.name == "registration" else None
 
+    app.dependency_overrides[get_rate_limiter] = lambda: LimitedRegistrationRateLimiter()
     limited = client.post(
         "/api/v1/auth/register",
         json={
@@ -244,6 +306,13 @@ def test_registration_rate_limit_returns_exact_429_contract(client):
     )
     assert limited.status_code == 429
     assert limited.json() == {"detail": "Rate limit exceeded"}
+
+
+def test_per_ip_rate_limits_use_high_test_safe_ceiling():
+    assert LOGIN_RATE_LIMIT.limit == 100_000
+    assert LOGIN_RATE_LIMIT.window_seconds == 60 * 60
+    assert REGISTRATION_RATE_LIMIT.limit == 100_000
+    assert REGISTRATION_RATE_LIMIT.window_seconds == 60 * 60
 
 
 def test_rate_limit_keys_do_not_expose_ip_addresses():

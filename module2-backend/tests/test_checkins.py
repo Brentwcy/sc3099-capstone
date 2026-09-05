@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ from app.models.user import User
 from app.schemas.face import FaceVerifyResult
 from app.main import app
 from app.services.face_mock import LivenessResult, get_face_service
+from app.services.ip_geolocation import IPCountryLookupError, get_ip_country_resolver
 
 
 def create_checkin_setup(
@@ -38,7 +40,6 @@ def create_checkin_setup(
             "code": code,
             "name": "Week 4 Check-ins",
             "semester": "AY2026-27 Sem 1",
-            "instructor_id": instructor_user["id"],
             "venue_latitude": 1.3483,
             "venue_longitude": 103.6831,
             "geofence_radius_meters": 100,
@@ -111,7 +112,6 @@ def test_student_can_list_and_filter_own_checkins(
             "code": "HIST101",
             "name": "Check-in History",
             "semester": "AY2026-27 Sem 1",
-            "instructor_id": instructor_user["id"],
         },
     )
     assert course.status_code == 201, course.text
@@ -227,6 +227,122 @@ def test_atomic_checkin_uses_mock_and_persists_risk_signals(
     assert db_session.query(RiskSignal).count() == 1
     assert db_session.query(AuditLog).filter_by(action="checkin_attempted").count() == 2
     assert db_session.query(AuditLog).filter_by(action="checkin_approved").count() == 1
+
+
+def test_checkin_rejects_foreign_ip_and_non_singapore_gps(
+    client,
+    db_session,
+    student,
+    instructor,
+    admin,
+):
+    student_user, student_headers = student
+    instructor_user, instructor_headers = instructor
+    _admin_user, admin_headers = admin
+    _course, session = create_checkin_setup(
+        client,
+        student_user=student_user,
+        student_headers=student_headers,
+        instructor_user=instructor_user,
+        instructor_headers=instructor_headers,
+        admin_headers=admin_headers,
+    )
+
+    class StubCountryResolver:
+        def __init__(self):
+            self.lookups = []
+
+        async def country_code(self, ip_address):
+            self.lookups.append(ip_address)
+            if ip_address == "1.1.1.1":
+                raise IPCountryLookupError("lookup unavailable")
+            return {"8.8.8.8": "US", "119.81.44.63": "SG"}[ip_address]
+
+    resolver = StubCountryResolver()
+    app.dependency_overrides[get_ip_country_resolver] = lambda: resolver
+
+    foreign_ip = client.post(
+        "/api/v1/checkins/",
+        headers={**student_headers, "X-Forwarded-For": "8.8.8.8, 10.0.0.1"},
+        json=checkin_payload(session["id"]),
+    )
+    assert foreign_ip.status_code == 403
+    assert foreign_ip.json() == {
+        "detail": "Check-ins are only permitted from Singapore"
+    }
+    assert resolver.lookups == ["8.8.8.8"]
+
+    unverifiable_ip = client.post(
+        "/api/v1/checkins/",
+        headers={**student_headers, "X-Forwarded-For": "1.1.1.1"},
+        json=checkin_payload(session["id"]),
+    )
+    assert unverifiable_ip.status_code == 403
+    assert resolver.lookups == ["8.8.8.8", "1.1.1.1"]
+
+    outside_singapore = client.post(
+        "/api/v1/checkins/",
+        headers={**student_headers, "X-Forwarded-For": "119.81.44.63"},
+        json=checkin_payload(
+            session["id"],
+            latitude=40.7128,
+            longitude=-74.006,
+        ),
+    )
+    assert outside_singapore.status_code == 403
+    # GPS rejection occurs before a public-IP lookup.
+    assert resolver.lookups == ["8.8.8.8", "1.1.1.1"]
+
+    singapore_ip = client.post(
+        "/api/v1/checkins/",
+        headers={**student_headers, "X-Forwarded-For": "119.81.44.63"},
+        json=checkin_payload(session["id"]),
+    )
+    assert singapore_ip.status_code == 201, singapore_ip.text
+    assert resolver.lookups == ["8.8.8.8", "1.1.1.1", "119.81.44.63"]
+    assert db_session.query(CheckIn).count() == 1
+    assert db_session.query(AuditLog).filter_by(action="checkin_attempted").count() == 4
+
+
+def test_checkin_allows_private_forwarded_ip_without_country_lookup(
+    client,
+    student,
+    instructor,
+    admin,
+):
+    student_user, student_headers = student
+    instructor_user, instructor_headers = instructor
+    _admin_user, admin_headers = admin
+    _course, session = create_checkin_setup(
+        client,
+        student_user=student_user,
+        student_headers=student_headers,
+        instructor_user=instructor_user,
+        instructor_headers=instructor_headers,
+        admin_headers=admin_headers,
+    )
+
+    class UnexpectedCountryResolver:
+        async def country_code(self, _ip_address):
+            raise AssertionError("Private IPs must not use public geolocation")
+
+    app.dependency_overrides[get_ip_country_resolver] = (
+        lambda: UnexpectedCountryResolver()
+    )
+    malformed = client.post(
+        "/api/v1/checkins/",
+        headers={**student_headers, "X-Forwarded-For": "not-an-ip"},
+        json=checkin_payload(session["id"]),
+    )
+    assert malformed.status_code == 403
+
+    response = client.post(
+        "/api/v1/checkins/",
+        headers={**student_headers, "X-Forwarded-For": "10.20.30.40, 8.8.8.8"},
+        json=checkin_payload(session["id"]),
+    )
+
+    assert response.status_code == 201, response.text
 
 
 def test_face_matching_uses_enrolled_template(
@@ -395,7 +511,7 @@ def test_outside_geofence_and_failed_liveness_are_rejected(
     assert db_session.query(CheckIn).count() == 2
 
 
-def test_session_and_detail_queries_enforce_ownership(
+def test_session_and_detail_queries_enforce_role_access(
     client,
     student,
     instructor,
@@ -419,6 +535,19 @@ def test_session_and_detail_queries_enforce_ownership(
     )
     checkin_id = created.json()["id"]
 
+    other_payload = {
+        "email": "other-checkin-instructor@example.com",
+        "password": "testpassword123",
+        "full_name": "Other Check-in Instructor",
+        "role": "instructor",
+    }
+    assert client.post("/api/v1/auth/register", json=other_payload).status_code == 201
+    other_token = client.post(
+        "/api/v1/auth/login",
+        json={"email": other_payload["email"], "password": other_payload["password"]},
+    ).json()["access_token"]
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
     detail = client.get(f"/api/v1/checkins/{checkin_id}", headers=student_headers)
     assert detail.status_code == 200
     assert detail.json()["student_id"] == student_user["id"]
@@ -428,6 +557,14 @@ def test_session_and_detail_queries_enforce_ownership(
     )
     assert session_list.status_code == 200
     assert session_list.json()[0]["id"] == checkin_id
+    assert client.get(
+        f"/api/v1/checkins/session/{session['id']}",
+        headers=other_headers,
+    ).status_code == 200
+    assert client.get(
+        f"/api/v1/checkins/{checkin_id}",
+        headers=other_headers,
+    ).status_code == 200
     assert client.get(
         f"/api/v1/checkins/session/{session['id']}",
         headers=student_headers,
@@ -447,7 +584,134 @@ def test_session_and_detail_queries_enforce_ownership(
     assert filtered.json()["total"] == 1
     assert filtered.json()["items"][0]["id"] == checkin_id
     assert filtered.json()["items"][0]["student_email"]
+    assert client.get("/api/v1/checkins/", headers=other_headers).json()["total"] == 1
     assert client.get("/api/v1/checkins/", headers=student_headers).status_code == 403
+
+
+def test_flagged_review_queue_is_paginated_role_scoped_and_actionable(
+    client,
+    db_session,
+    student,
+    instructor,
+    ta,
+    admin,
+):
+    student_user, student_headers = student
+    instructor_user, instructor_headers = instructor
+    _ta_user, ta_headers = ta
+    _admin_user, admin_headers = admin
+    course, first_session = create_checkin_setup(
+        client,
+        student_user=student_user,
+        student_headers=student_headers,
+        instructor_user=instructor_user,
+        instructor_headers=instructor_headers,
+        admin_headers=admin_headers,
+        activate=False,
+    )
+    now = datetime.now(timezone.utc)
+    additional_sessions = []
+    for index in range(2):
+        response = client.post(
+            "/api/v1/sessions/",
+            headers=instructor_headers,
+            json={
+                "course_id": course["id"],
+                "name": f"Review Session {index + 2}",
+                "scheduled_start": (now + timedelta(hours=index + 2)).isoformat(),
+                "scheduled_end": (now + timedelta(hours=index + 3)).isoformat(),
+            },
+        )
+        assert response.status_code == 201, response.text
+        additional_sessions.append(response.json())
+
+    risk_factors = json.dumps(
+        [
+            {
+                "type": "geo_out_of_bounds",
+                "severity": "high",
+                "weight": 0.4,
+                "confidence": 1.0,
+            }
+        ]
+    )
+    flagged = CheckIn(
+        session_id=first_session["id"],
+        student_id=student_user["id"],
+        status=CheckInStatus.flagged,
+        checked_in_at=now - timedelta(minutes=10),
+        risk_score=0.72,
+        risk_factors=risk_factors,
+    )
+    appealed = CheckIn(
+        session_id=additional_sessions[0]["id"],
+        student_id=student_user["id"],
+        status=CheckInStatus.appealed,
+        checked_in_at=now - timedelta(minutes=20),
+        risk_score=0.81,
+        risk_factors=risk_factors,
+        reviewed_by_id=instructor_user["id"],
+        reviewed_at=now - timedelta(minutes=5),
+        review_notes="Initially rejected after review.",
+        appeal_reason="The venue GPS reading was inaccurate.",
+        appealed_at=now,
+    )
+    rejected = CheckIn(
+        session_id=additional_sessions[1]["id"],
+        student_id=student_user["id"],
+        status=CheckInStatus.rejected,
+        checked_in_at=now,
+        risk_score=1.0,
+    )
+    db_session.add_all([flagged, appealed, rejected])
+    db_session.commit()
+
+    first_page = client.get(
+        "/api/v1/checkins/flagged",
+        headers=instructor_headers,
+        params={"course_id": course["id"], "limit": 1, "offset": 0},
+    )
+    assert first_page.status_code == 200, first_page.text
+    body = first_page.json()
+    assert body["total"] == 2
+    assert body["limit"] == 1
+    assert body["offset"] == 0
+    assert len(body["items"]) == 1
+    item = body["items"][0]
+    assert item["id"] == appealed.id
+    assert item["session_name"] == additional_sessions[0]["name"]
+    assert item["course_id"] == course["id"]
+    assert item["course_code"] == course["code"]
+    assert item["course_name"] == course["name"]
+    assert item["student_id"] == student_user["id"]
+    assert item["student_name"] == student_user["full_name"]
+    assert item["student_email"] == student_user["email"]
+    assert item["status"] == "appealed"
+    assert item["risk_factors"][0]["type"] == "geo_out_of_bounds"
+    assert item["reviewed_by_id"] == instructor_user["id"]
+    assert item["review_notes"] == "Initially rejected after review."
+    assert item["appeal_reason"] == "The venue GPS reading was inaccurate."
+    assert item["appealed_at"] is not None
+    assert "latitude" not in item
+    assert "device_id" not in item
+    assert "liveness_score" not in item
+
+    second_page = client.get(
+        "/api/v1/checkins/flagged",
+        headers=ta_headers,
+        params={"limit": 1, "offset": 1},
+    )
+    assert second_page.status_code == 200
+    assert second_page.json()["items"][0]["id"] == flagged.id
+    assert client.get(
+        "/api/v1/checkins/flagged",
+        headers=admin_headers,
+        params={"session_id": rejected.session_id},
+    ).json()["total"] == 0
+    assert client.get(
+        "/api/v1/checkins/flagged",
+        headers=student_headers,
+    ).status_code == 403
 
 
 def test_reused_device_fingerprint_is_flagged_and_audited(

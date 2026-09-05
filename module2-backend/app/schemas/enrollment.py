@@ -21,7 +21,6 @@ class MyEnrollmentResponse(EnrollmentResponse):
     course_code: str
     course_name: str
     semester: str
-    instructor_name: str | None = None
 
 
 class EnrolledStudentResponse(BaseModel):

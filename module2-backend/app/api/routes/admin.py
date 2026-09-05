@@ -27,6 +27,9 @@ def set_active_state(
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     user.is_active = active
+    if active:
+        user.failed_login_attempts = 0
+        user.login_blocked_at = None
     append_audit_log(
         db,
         action="user_updated",

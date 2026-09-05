@@ -49,7 +49,6 @@ class AttendanceSession(Base):
             name="ck_sessions_risk_threshold",
         ),
         Index("ix_sessions_course_id", "course_id"),
-        Index("ix_sessions_instructor_id", "instructor_id"),
         Index("ix_sessions_status", "status"),
         Index("ix_sessions_scheduled_start", "scheduled_start"),
         Index("ix_sessions_checkin_window", "checkin_opens_at", "checkin_closes_at"),
@@ -58,9 +57,6 @@ class AttendanceSession(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     course_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
-    )
-    instructor_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     session_type: Mapped[SessionType] = mapped_column(

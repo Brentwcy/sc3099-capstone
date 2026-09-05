@@ -80,6 +80,9 @@ Login to receive JWT tokens.
 **Error Responses:**
 - `401 Unauthorized`: Invalid credentials
 - `403 Forbidden`: Account disabled
+- `429 Too Many Requests`: Account blocked after 10 consecutive failed password attempts, or the IP login rate limit was exceeded
+
+Failed-password attempts are counted per existing account. The tenth consecutive failure returns `401` and blocks the account; every later login attempt returns `429`, including attempts with the correct password. A successful login before the threshold resets the counter. An admin can clear the block through the account activation endpoint.
 
 #### POST /auth/refresh
 Refresh access token.
@@ -253,7 +256,6 @@ List courses with optional filters. **Requires auth.**
 |-----------|------|---------|-------------|
 | `is_active` | boolean | true | Filter by active status |
 | `semester` | string | - | Filter by semester |
-| `instructor_id` | uuid | - | Filter by instructor (admin only) |
 | `limit` | int | 50 | Results per page |
 | `offset` | int | 0 | Pagination offset |
 
@@ -266,8 +268,6 @@ List courses with optional filters. **Requires auth.**
       "code": "CS6101",
       "name": "Advanced Topics in CS",
       "semester": "AY2024-25 Sem 1",
-      "instructor_id": "uuid",
-      "instructor_name": "Dr. Smith",
       "venue_name": "LT1",
       "venue_latitude": 1.3483,
       "venue_longitude": 103.6831,
@@ -300,7 +300,6 @@ Create a new course. **Requires auth (admin only).**
   "code": "CS6101",
   "name": "Advanced Topics in CS",
   "semester": "AY2024-25 Sem 1",
-  "instructor_id": "uuid",
   "venue_name": "LT1",
   "venue_latitude": 1.3483,
   "venue_longitude": 103.6831,
@@ -312,7 +311,7 @@ Create a new course. **Requires auth (admin only).**
 **Response:** `201 Created` - Returns created course object
 
 #### PUT /courses/{course_id}
-Update a course. **Requires auth (admin or course instructor).**
+Update a course. **Requires auth (instructor or admin).**
 
 **Request:** (partial update supported)
 ```json
@@ -344,7 +343,6 @@ List all sessions with filters. **Requires auth (instructor/admin).**
 |-----------|------|---------|-------------|
 | `status` | string | - | Filter by status (scheduled\|active\|closed\|cancelled) |
 | `course_id` | uuid | - | Filter by course |
-| `instructor_id` | uuid | - | Filter by instructor |
 | `start_date` | ISO8601 | - | Sessions starting after this date |
 | `end_date` | ISO8601 | - | Sessions starting before this date |
 | `limit` | int | 50 | Results per page |
@@ -359,7 +357,6 @@ List all sessions with filters. **Requires auth (instructor/admin).**
       "course_id": "uuid",
       "course_code": "CS6101",
       "course_name": "Advanced Topics in CS",
-      "instructor_id": "uuid",
       "name": "Lecture 5: Neural Networks",
       "session_type": "lecture",
       "status": "active",
@@ -402,7 +399,7 @@ This endpoint returns sessions where check-in is currently open, useful for stud
 ```
 
 #### GET /sessions/my-sessions
-List sessions for courses the current user is enrolled in (students) or teaches (instructors). **Requires auth.**
+List sessions for courses the current user is enrolled in (students). Instructors, TAs, and admins can discover all sessions. **Requires auth.**
 
 **Query Parameters:**
 | Parameter | Type | Default | Description |
@@ -421,7 +418,6 @@ Get session details. **Requires auth.**
 {
   "id": "uuid",
   "course_id": "uuid",
-  "instructor_id": "uuid",
   "name": "Lecture 5: Neural Networks",
   "session_type": "lecture",
   "status": "active",
@@ -467,7 +463,7 @@ Create a new session. **Requires auth (instructor only).**
 **Response:** `201 Created` - Returns created session object
 
 **Validation:**
-- `course_id` must be a course the instructor teaches
+- `course_id` must identify an active course
 - `scheduled_start` must be in the future
 - `scheduled_end` must be after `scheduled_start`
 - `checkin_closes_at` must be after `checkin_opens_at`
@@ -506,6 +502,13 @@ Check-ins record student attendance at sessions.
 
 #### POST /checkins/
 Student check-in to a session. **Requires auth (student only).**
+
+Check-ins are Singapore-only. The submitted GPS coordinates must fall within
+Singapore's national bounds. For the network check, the backend uses the first
+address in `X-Forwarded-For` when that header is present, otherwise it uses the
+socket address. Private, loopback, link-local, and local-development addresses
+are allowed as on-campus traffic. A public address must resolve to country code
+`SG`; foreign, malformed, or unverifiable public addresses are rejected.
 
 **Request:**
 ```json
@@ -550,6 +553,7 @@ Student check-in to a session. **Requires auth (student only).**
 
 **Error Responses:**
 - `400 Bad Request`: Session not active, check-in window closed, already checked in
+- `403 Forbidden`: GPS is outside Singapore, or the public client IP is not verified as Singaporean
 - `404 Not Found`: Session not found
 
 #### GET /checkins/
@@ -642,7 +646,7 @@ Get all check-ins for a session. **Requires auth (instructor/TA).**
 ```
 
 #### GET /checkins/flagged
-Get check-ins requiring review (flagged or appealed). **Requires auth (instructor/TA).**
+Get the actionable check-in review queue. This includes `flagged` and `appealed` records. Unappealed `rejected` records are excluded and remain available through `GET /checkins/?status=rejected`. **Requires auth (instructor/TA/admin).**
 
 **Query Parameters:**
 | Parameter | Type | Default | Description |
@@ -650,28 +654,43 @@ Get check-ins requiring review (flagged or appealed). **Requires auth (instructo
 | `course_id` | uuid | - | Filter by course |
 | `session_id` | uuid | - | Filter by session |
 | `limit` | int | 50 | Results per page |
+| `offset` | int | 0 | Pagination offset |
 
 **Response:** `200 OK`
 ```json
-[
-  {
-    "id": "uuid",
-    "session_id": "uuid",
-    "session_name": "Lecture 5",
-    "student_id": "uuid",
-    "student_name": "John Doe",
-    "status": "flagged",  // or "appealed"
-    "checked_in_at": "2024-01-15T14:05:00Z",
-    "risk_score": 0.72,
-    "risk_factors": [
-      {"type": "geo_out_of_bounds", "severity": "high", "weight": 0.4},
-      {"type": "device_unknown", "severity": "medium", "weight": 0.15}
-    ],
-    "appeal_reason": null,  // Set if status is "appealed"
-    "appealed_at": null
-  }
-]
+{
+  "items": [
+    {
+      "id": "uuid",
+      "session_id": "uuid",
+      "session_name": "Lecture 5",
+      "course_id": "uuid",
+      "course_code": "CS6101",
+      "course_name": "Machine Learning",
+      "student_id": "uuid",
+      "student_name": "John Doe",
+      "student_email": "john@example.com",
+      "status": "flagged",
+      "checked_in_at": "2024-01-15T14:05:00Z",
+      "risk_score": 0.72,
+      "risk_factors": [
+        {"type": "geo_out_of_bounds", "severity": "high", "weight": 0.4},
+        {"type": "device_unknown", "severity": "medium", "weight": 0.15}
+      ],
+      "reviewed_by_id": null,
+      "reviewed_at": null,
+      "review_notes": null,
+      "appeal_reason": null,
+      "appealed_at": null
+    }
+  ],
+  "total": 12,
+  "limit": 50,
+  "offset": 0
+}
 ```
+
+The queue intentionally excludes raw coordinates, device identifiers, and biometric scores. Reviewers can use `GET /checkins/{checkin_id}` when the full authorized detail is required.
 
 #### GET /checkins/{checkin_id}
 Get specific check-in details. **Requires auth (owner student, or instructor/TA for session).**
@@ -803,7 +822,7 @@ Get statistics for a specific session. **Requires auth (instructor/TA for sessio
 ```
 
 #### GET /stats/courses/{course_id}
-Get attendance statistics for a course. **Requires auth (instructor for course, or admin).**
+Get attendance statistics for a course. **Requires auth (instructor or admin).**
 
 **Query Parameters:**
 | Parameter | Type | Default | Description |
@@ -982,7 +1001,6 @@ Get current student's course enrollments. **Requires auth (student).**
     "course_code": "CS6101",
     "course_name": "Advanced Topics in CS",
     "semester": "AY2024-25 Sem 1",
-    "instructor_name": "Dr. Smith",
     "enrolled_at": "2024-01-10T10:00:00Z",
     "is_active": true
   }
@@ -1019,7 +1037,7 @@ Get all students enrolled in a course. **Requires auth (instructor/TA for course
 ```
 
 #### POST /enrollments/
-Enroll a student in a course. **Requires auth (instructor for course, or admin).**
+Enroll a student in a course. **Requires auth (instructor or admin).**
 
 **Request:**
 ```json
@@ -1036,7 +1054,7 @@ Enroll a student in a course. **Requires auth (instructor for course, or admin).
 - `404 Not Found`: Student or course not found
 
 #### POST /enrollments/bulk
-Bulk enroll students by email. **Requires auth (instructor for course, or admin).**
+Bulk enroll students by email. **Requires auth (instructor or admin).**
 
 **Request:**
 ```json
@@ -1067,7 +1085,7 @@ Bulk enroll students by email. **Requires auth (instructor for course, or admin)
 ```
 
 #### DELETE /enrollments/{enrollment_id}
-Remove an enrollment. **Requires auth (instructor for course, or admin).**
+Remove an enrollment. **Requires auth (instructor or admin).**
 
 **Response:** `204 No Content`
 
@@ -1150,7 +1168,7 @@ Get audit logs with comprehensive filtering. **Requires auth (admin only).**
 Data export endpoints for reporting.
 
 #### GET /export/attendance/{course_id}
-Export attendance data for a course. **Requires auth (instructor for course).**
+Export attendance data for a course. **Requires auth (instructor).**
 
 **Query Parameters:**
 | Parameter | Type | Default | Description |
@@ -1598,7 +1616,7 @@ Allows setting session status for testing edge cases like checking in to closed 
 #### POST /admin/enrollments/
 Create enrollment as admin (bypasses instructor ownership check). **Requires auth (admin only).**
 
-This endpoint is designed for test setup where an admin needs to enroll a student without being the course instructor.
+This endpoint is designed for test setup where an admin needs to enroll a student directly.
 
 **Request:**
 ```json
@@ -1686,10 +1704,10 @@ All endpoints may return these error codes:
 
 | Endpoint Type | Limit | Window |
 |---------------|-------|--------|
-| Login attempts | 60 | per hour per IP |
+| Login attempts | 100,000 | per hour per IP |
 | API requests | 1000 | per hour per user |
 | Check-in attempts | 10 | per minute per user |
-| Registration | 10 | per hour per IP |
+| Registration | 100,000 | per hour per IP |
 
 ---
 

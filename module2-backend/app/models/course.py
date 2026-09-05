@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, String, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -29,7 +29,6 @@ class Course(Base):
         CheckConstraint("risk_threshold >= 0 AND risk_threshold <= 1", name="ck_courses_risk_threshold"),
         Index("ix_courses_semester", "semester"),
         Index("ix_courses_is_active", "is_active"),
-        Index("ix_courses_instructor_id", "instructor_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
@@ -37,9 +36,6 @@ class Course(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     semester: Mapped[str] = mapped_column(String(20), nullable=False)
-    instructor_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     venue_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     venue_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)

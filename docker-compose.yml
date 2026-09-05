@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ==========================================================================
   # Infrastructure Services
@@ -106,7 +104,6 @@ services:
     ports:
       - "8501:8501"
     environment:
-      DATABASE_URL: postgresql://saiv:saiv_password@postgres:5432/saiv
       BACKEND_URL: http://backend:8000
       PROMETHEUS_URL: http://prometheus:9090
     depends_on:

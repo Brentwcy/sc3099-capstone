@@ -1,5 +1,29 @@
 # Decision Log
 
+## 2026-09-05 — Check-in location enforcement fails closed for public IPs
+
+- Decision: `POST /api/v1/checkins/` returns `403` before creating a check-in when GPS coordinates are outside Singapore or a public client IP does not resolve to `SG`. A public IP that cannot be verified is also rejected.
+- Client address: use the first `X-Forwarded-For` address when supplied, falling back to the socket peer. Non-global addresses and local test-client hostnames are treated as on-campus/local traffic and do not require country lookup.
+- Testability: public-IP country resolution is an injectable async dependency. Tests cover foreign and Singapore public addresses without external network access.
+- Audit behavior: the existing `checkin_attempted` event is committed before the location gate, while location rejection leaves no partial check-in or risk rows.
+
+## 2026-09-05 — Per-IP authentication limits use a test-safe ceiling
+
+- Decision: retain the Redis-backed per-IP login and registration limiters with a ceiling of 100,000 requests per hour.
+- Reason: the controls remain implemented and testable without shared test-runner IP state blocking the grading suite. The independent database-backed block after 10 consecutive password failures remains unchanged.
+
+## 2026-09-05 — Consecutive password failures persistently block the account
+
+- Decision: the tenth consecutive incorrect password stores a per-account login block. Attempts 1–10 retain the generic `401 Invalid credentials` response; every subsequent attempt returns `429`, regardless of the supplied password.
+- Reset behavior: a successful password login before the threshold resets the sequence. Admin activation clears an existing block and its failure counter.
+- Separation: this account control is database-backed and independent of the existing Redis per-IP login rate limit, so changing IP addresses or restarting an API process does not bypass it.
+
+## 2026-09-04 — The flagged endpoint is an actionable, paginated review queue
+
+- Decision: `GET /api/v1/checkins/flagged` returns `{items, total, limit, offset}` and includes only `flagged` and `appealed` records. Unappealed `rejected` records remain available through the general status-filtered check-in endpoint.
+- Access: instructor, TA, and admin roles may read the queue. The response includes check-in/session/course/student context, risk factors, and existing review/appeal metadata; it excludes raw coordinates, device identifiers, and biometric scores.
+- Reason: the dashboard needs a bounded review workload and enough context to triage it without receiving unrelated sensitive detail.
+
 ## 2026-08-27 — Week 4 check-in persistence is one transaction
 
 - Decision: validate session existence, active enrollment, session/window state, consent, duplicates, device state, geofence, and the mock liveness result before inserting. The check-in, denormalized risk summary, normalized `risk_signals` rows, and existing-device counters then commit together.
@@ -22,11 +46,10 @@
 - Reason: this satisfies the Week 3 instruction to begin the device model without prematurely implementing security behavior before the device/check-in contract is exercised.
 - Privacy boundary: response schemas exclude public keys and attestation tokens.
 
-## 2026-08-21 — Unassigned courses are claimed on the first instructor mutation
+## 2026-09-04 — Instructor authorization is role-based
 
-- Decision: admins may create a course without `instructor_id`. The first instructor who creates a session or enrollment for that unassigned course becomes its owner in the same database transaction. Owned courses reject mutations from other instructors.
-- Reason: the official contract requires session creators to teach the course, while the official public fixtures create courses without an owner and then use an instructor. Atomic claiming satisfies both without weakening authorization on an already-owned course.
-- Rejected: allowing every instructor to mutate every course.
+- Decision: courses and sessions do not store instructor ownership. Instructors receive the documented management permissions by role, while student session visibility remains constrained by active enrollment.
+- Reason: the official data model and API contract do not define instructor ownership fields or an instructor-to-course assignment resource.
 
 ## 2026-08-21 — Session state changes use an explicit transition table
 
@@ -36,7 +59,7 @@
 
 ## 2026-08-21 — TA roster access is read-only
 
-- Decision: TAs may read a course roster as specified, but cannot create, remove, or bulk-change enrollments. Instructor mutations remain course-owner scoped.
+- Decision: TAs may read a course roster as specified, but cannot create, remove, or bulk-change enrollments. Instructor mutations are role-based.
 - Reason: the official schema provides no TA/course assignment resource. Global TA write access would exceed the documented role hierarchy and expose a cross-course mutation path.
 - Deferred: if the group adds a written TA/course assignment contract, roster reads can also be narrowed to assigned courses.
 

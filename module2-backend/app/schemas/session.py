@@ -78,7 +78,6 @@ class SessionResponse(BaseModel):
     course_id: str
     course_code: str | None = None
     course_name: str | None = None
-    instructor_id: str | None
     name: str
     session_type: SessionType
     description: str | None

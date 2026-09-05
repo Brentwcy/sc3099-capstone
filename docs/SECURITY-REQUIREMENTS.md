@@ -79,10 +79,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 | Endpoint Category | Limit | Window | Key |
 |-------------------|-------|--------|-----|
-| Login attempts | 60 | 1 hour | IP address |
+| Login attempts | 100,000 | 1 hour | IP address |
 | API requests | 1000 | 1 hour | User ID |
 | Check-in attempts | 10 | 1 minute | User ID |
-| Registration | 10 | 1 hour | IP address |
+| Registration | 100,000 | 1 hour | IP address |
 
 **Implementation with Redis:**
 ```python
@@ -101,6 +101,27 @@ def check_rate_limit(key: str, limit: int, window: int) -> bool:
     pipe.execute()
     return True
 ```
+
+---
+
+## Singapore-Only Check-ins
+
+`POST /checkins/` enforces both of the following location checks before creating
+a check-in:
+
+- GPS latitude and longitude must be within Singapore's national bounds.
+- The client network address must be Singaporean when it is a public IP. The
+  first `X-Forwarded-For` entry is authoritative when present; otherwise the
+  socket peer address is used.
+
+Private, loopback, link-local, reserved, and local-development addresses may be
+treated as on-campus and bypass public-IP country lookup. Foreign public IPs,
+malformed forwarded addresses, and public IPs whose country cannot be verified
+fail closed with `403 Forbidden`. Location-rejected submissions still retain the
+immutable `checkin_attempted` audit event, but create no check-in or risk rows.
+
+The public-IP provider is configured through `IP_COUNTRY_LOOKUP_URL` (which must
+contain `{ip}`) and `IP_COUNTRY_LOOKUP_TIMEOUT_SECONDS`.
 
 ---
 

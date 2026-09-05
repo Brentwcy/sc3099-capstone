@@ -102,6 +102,34 @@ class PaginatedCheckIns(BaseModel):
     offset: int
 
 
+class FlaggedCheckInResponse(BaseModel):
+    id: str
+    session_id: str
+    session_name: str
+    course_id: str
+    course_code: str
+    course_name: str
+    student_id: str
+    student_name: str
+    student_email: str
+    status: CheckInStatus
+    checked_in_at: datetime
+    risk_score: float
+    risk_factors: list[RiskFactorResponse]
+    reviewed_by_id: str | None
+    reviewed_at: datetime | None
+    review_notes: str | None
+    appeal_reason: str | None
+    appealed_at: datetime | None
+
+
+class PaginatedFlaggedCheckIns(BaseModel):
+    items: list[FlaggedCheckInResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 class MyCheckInResponse(BaseModel):
     id: str
     session_id: str

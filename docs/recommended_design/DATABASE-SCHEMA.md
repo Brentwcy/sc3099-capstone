@@ -100,7 +100,6 @@ Attendance sessions (lectures, tutorials, etc.).
 |--------|------|-------------|-------------|
 | id | VARCHAR(36) | PK | UUID |
 | course_id | VARCHAR(36) | FK(courses.id), NOT NULL | Course |
-| instructor_id | VARCHAR(36) | FK(users.id), NULLABLE | Instructor |
 | name | VARCHAR(255) | NOT NULL | e.g., "Lecture 5" |
 | session_type | VARCHAR(50) | DEFAULT 'lecture' | lecture\|tutorial\|lab\|exam |
 | description | TEXT | NULLABLE | |

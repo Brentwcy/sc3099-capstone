@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -14,17 +14,9 @@ from app.services.audit import append_audit_log
 router = APIRouter(prefix="/courses", tags=["Courses"])
 
 
-def course_response(course: Course, instructor_name: str | None = None) -> CourseResponse:
+def course_response(course: Course) -> CourseResponse:
     values = {column.name: getattr(course, column.name) for column in Course.__table__.columns}
-    return CourseResponse(**values, instructor_name=instructor_name)
-
-
-def validate_instructor(db: Session, instructor_id: str | None) -> None:
-    if instructor_id is None:
-        return
-    instructor = db.get(User, instructor_id)
-    if instructor is None or instructor.role != UserRole.instructor or not instructor.is_active:
-        raise HTTPException(status_code=400, detail="Instructor must be an active instructor user")
+    return CourseResponse(**values)
 
 
 def validate_coordinate_pair(latitude: float | None, longitude: float | None) -> None:
@@ -39,10 +31,9 @@ def validate_coordinate_pair(latitude: float | None, longitude: float | None) ->
 def list_courses(
     is_active: bool | None = True,
     semester: str | None = Query(default=None, max_length=20),
-    instructor_id: str | None = None,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    current_user: User = Depends(get_current_user),
+    _current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PaginatedCourses:
     filters = []
@@ -50,24 +41,12 @@ def list_courses(
         filters.append(Course.is_active == is_active)
     if semester is not None:
         filters.append(Course.semester == semester)
-    if instructor_id is not None:
-        if current_user.role != UserRole.admin:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-        filters.append(Course.instructor_id == instructor_id)
-    elif current_user.role == UserRole.instructor:
-        filters.append(or_(Course.instructor_id == current_user.id, Course.instructor_id.is_(None)))
-
     total = db.scalar(select(func.count()).select_from(Course).where(*filters)) or 0
-    rows = db.execute(
-        select(Course, User.full_name)
-        .outerjoin(User, User.id == Course.instructor_id)
-        .where(*filters)
-        .order_by(Course.code)
-        .limit(limit)
-        .offset(offset)
+    courses = db.scalars(
+        select(Course).where(*filters).order_by(Course.code).limit(limit).offset(offset)
     ).all()
     return PaginatedCourses(
-        items=[course_response(course, instructor_name) for course, instructor_name in rows],
+        items=[course_response(course) for course in courses],
         total=total,
         limit=limit,
         offset=offset,
@@ -80,14 +59,10 @@ def read_course(
     _current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CourseResponse:
-    row = db.execute(
-        select(Course, User.full_name)
-        .outerjoin(User, User.id == Course.instructor_id)
-        .where(Course.id == course_id)
-    ).one_or_none()
-    if row is None:
+    course = db.get(Course, course_id)
+    if course is None:
         raise HTTPException(status_code=404, detail="Course not found")
-    return course_response(row[0], row[1])
+    return course_response(course)
 
 
 @router.post("/", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
@@ -97,7 +72,6 @@ def create_course(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> CourseResponse:
-    validate_instructor(db, payload.instructor_id)
     course = Course(**payload.model_dump())
     db.add(course)
     try:
@@ -115,12 +89,7 @@ def create_course(
         db.rollback()
         raise HTTPException(status_code=400, detail="Course code already exists") from None
     db.refresh(course)
-    instructor_name = (
-        db.scalar(select(User.full_name).where(User.id == course.instructor_id))
-        if course.instructor_id
-        else None
-    )
-    return course_response(course, instructor_name)
+    return course_response(course)
 
 
 @router.put("/{course_id}", response_model=CourseResponse)
@@ -134,16 +103,12 @@ def update_course(
     course = db.get(Course, course_id)
     if course is None:
         raise HTTPException(status_code=404, detail="Course not found")
-    if current_user.role != UserRole.admin and not (
-        current_user.role == UserRole.instructor and course.instructor_id == current_user.id
-    ):
+    if current_user.role not in {UserRole.admin, UserRole.instructor}:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     changes = payload.model_dump(exclude_unset=True)
-    if current_user.role != UserRole.admin and ({"instructor_id", "is_active"} & changes.keys()):
+    if current_user.role != UserRole.admin and "is_active" in changes:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
-    if "instructor_id" in changes:
-        validate_instructor(db, changes["instructor_id"])
     latitude = changes.get("venue_latitude", course.venue_latitude)
     longitude = changes.get("venue_longitude", course.venue_longitude)
     validate_coordinate_pair(latitude, longitude)
@@ -164,12 +129,7 @@ def update_course(
         db.rollback()
         raise HTTPException(status_code=400, detail="Course code already exists") from None
     db.refresh(course)
-    instructor_name = (
-        db.scalar(select(User.full_name).where(User.id == course.instructor_id))
-        if course.instructor_id
-        else None
-    )
-    return course_response(course, instructor_name)
+    return course_response(course)
 
 
 @router.delete("/{course_id}", status_code=status.HTTP_204_NO_CONTENT)

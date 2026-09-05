@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     face_service_url: str = "http://localhost:8001"
     face_connect_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
     face_read_timeout_seconds: float = Field(default=8.0, gt=0, le=60)
+    ip_country_lookup_url: str = "https://ipapi.co/{ip}/country/"
+    ip_country_lookup_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -42,6 +44,13 @@ class Settings(BaseSettings):
         value = value.strip().lower()
         if value not in {"mock", "http"}:
             raise ValueError("FACE_SERVICE_MODE must be 'mock' or 'http'")
+        return value
+
+    @field_validator("ip_country_lookup_url")
+    @classmethod
+    def validate_ip_country_lookup_url(cls, value: str) -> str:
+        if "{ip}" not in value:
+            raise ValueError("IP_COUNTRY_LOOKUP_URL must contain the {ip} placeholder")
         return value
 
     @property

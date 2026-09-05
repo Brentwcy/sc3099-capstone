@@ -10,7 +10,7 @@ from app.models.device import Device
 from app.schemas.device import DeviceRegister, DeviceResponse
 
 
-def create_course(client, headers, *, instructor_id=None, code=None):
+def create_course(client, headers, *, code=None):
     payload = {
         "code": code or f"CS{uuid4().hex[:6].upper()}",
         "name": "Secure Systems",
@@ -21,8 +21,6 @@ def create_course(client, headers, *, instructor_id=None, code=None):
         "geofence_radius_meters": 100,
         "risk_threshold": 0.5,
     }
-    if instructor_id is not None:
-        payload["instructor_id"] = instructor_id
     response = client.post("/api/v1/courses/", headers=headers, json=payload)
     assert response.status_code == 201, response.text
     return response.json()
@@ -41,8 +39,10 @@ def session_payload(course_id):
 
 def test_course_crud_role_filters_and_coordinate_validation(client, admin, instructor):
     _admin_user, admin_headers = admin
-    instructor_user, instructor_headers = instructor
-    course = create_course(client, admin_headers, instructor_id=instructor_user["id"])
+    _instructor_user, instructor_headers = instructor
+    course = create_course(client, admin_headers)
+    assert "instructor_id" not in course
+    assert "instructor_name" not in course
 
     assert client.post(
         "/api/v1/courses/",
@@ -89,9 +89,9 @@ def test_duplicate_course_code_is_rejected(client, admin):
 
 def test_enrollment_lifecycle_and_course_authorization(client, student, instructor, admin):
     student_user, student_headers = student
-    instructor_user, instructor_headers = instructor
+    _instructor_user, instructor_headers = instructor
     _admin_user, admin_headers = admin
-    course = create_course(client, admin_headers, instructor_id=instructor_user["id"])
+    course = create_course(client, admin_headers)
 
     enrolled = client.post(
         "/api/v1/admin/enrollments/",
@@ -109,6 +109,7 @@ def test_enrollment_lifecycle_and_course_authorization(client, student, instruct
     mine = client.get("/api/v1/enrollments/my-enrollments", headers=student_headers)
     assert mine.status_code == 200
     assert mine.json()[0]["course_code"] == course["code"]
+    assert "instructor_name" not in mine.json()[0]
     roster = client.get(
         f"/api/v1/enrollments/course/{course['id']}", headers=instructor_headers
     )
@@ -122,9 +123,9 @@ def test_enrollment_lifecycle_and_course_authorization(client, student, instruct
     assert client.get("/api/v1/enrollments/my-enrollments", headers=student_headers).json() == []
 
 
-def test_cross_course_instructor_access_is_forbidden(client, student, instructor, admin):
+def test_instructor_access_is_global_by_role(client, student, instructor, admin):
     student_user, _student_headers = student
-    owner, owner_headers = instructor
+    first_instructor, first_instructor_headers = instructor
     _admin_user, admin_headers = admin
     other_payload = {
         "email": "other-instructor@example.com",
@@ -138,7 +139,7 @@ def test_cross_course_instructor_access_is_forbidden(client, student, instructor
         json={"email": other_payload["email"], "password": other_payload["password"]},
     ).json()["access_token"]
     other_headers = {"Authorization": f"Bearer {other_token}"}
-    course = create_course(client, admin_headers, instructor_id=owner["id"])
+    course = create_course(client, admin_headers)
     client.post(
         "/api/v1/admin/enrollments/",
         headers=admin_headers,
@@ -147,13 +148,23 @@ def test_cross_course_instructor_access_is_forbidden(client, student, instructor
 
     assert client.get(
         f"/api/v1/enrollments/course/{course['id']}", headers=other_headers
-    ).status_code == 403
-    assert client.get(f"/api/v1/users/{student_user['id']}", headers=other_headers).status_code == 403
-    assert client.post(
+    ).status_code == 200
+    assert client.get(f"/api/v1/users/{student_user['id']}", headers=other_headers).status_code == 200
+    created = client.post(
         "/api/v1/sessions/", headers=other_headers, json=session_payload(course["id"])
-    ).status_code == 403
-    assert other["id"] != owner["id"]
-    assert owner_headers
+    )
+    assert created.status_code == 201
+    assert "instructor_id" not in created.json()
+    listed = client.get("/api/v1/sessions/", headers=first_instructor_headers)
+    assert listed.status_code == 200
+    assert created.json()["id"] in {item["id"] for item in listed.json()["items"]}
+    updated = client.patch(
+        f"/api/v1/sessions/{created.json()['id']}",
+        headers=first_instructor_headers,
+        json={"name": "Updated by another instructor"},
+    )
+    assert updated.status_code == 200
+    assert other["id"] != first_instructor["id"]
 
 
 def test_ta_roster_access_is_read_only(client, student, ta, admin):
@@ -175,10 +186,37 @@ def test_ta_roster_access_is_read_only(client, student, ta, admin):
     ).status_code == 403
 
 
-def test_unassigned_course_is_claimed_and_session_transitions_are_enforced(
-    client, instructor, admin
-):
+def test_ta_can_discover_sessions_with_filters(client, ta, instructor, admin):
+    _ta_user, ta_headers = ta
     instructor_user, instructor_headers = instructor
+    _admin_user, admin_headers = admin
+    course = create_course(client, admin_headers)
+    created = client.post(
+        "/api/v1/sessions/",
+        headers=instructor_headers,
+        json=session_payload(course["id"]),
+    )
+    assert created.status_code == 201, created.text
+
+    discovered = client.get(
+        "/api/v1/sessions/my-sessions",
+        headers=ta_headers,
+        params={"status": "scheduled", "upcoming": True, "limit": 10},
+    )
+    assert discovered.status_code == 200, discovered.text
+    assert created.json()["id"] in {session["id"] for session in discovered.json()}
+
+    excluded = client.get(
+        "/api/v1/sessions/my-sessions",
+        headers=ta_headers,
+        params={"status": "closed"},
+    )
+    assert excluded.status_code == 200
+    assert created.json()["id"] not in {session["id"] for session in excluded.json()}
+
+
+def test_session_creation_and_transitions_are_role_based(client, instructor, admin):
+    _instructor_user, instructor_headers = instructor
     _admin_user, admin_headers = admin
     course = create_course(client, admin_headers)
     created = client.post(
@@ -187,7 +225,7 @@ def test_unassigned_course_is_claimed_and_session_transitions_are_enforced(
     assert created.status_code == 201, created.text
     body = created.json()
     assert body["status"] == "scheduled"
-    assert body["instructor_id"] == instructor_user["id"]
+    assert "instructor_id" not in body
     assert body["venue_latitude"] == course["venue_latitude"]
     assert body["checkin_opens_at"] < body["scheduled_start"]
 

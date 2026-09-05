@@ -20,8 +20,10 @@ from app.schemas.checkin import (
     CheckInDetailResponse,
     CheckInListItemResponse,
     CheckInResponse,
+    FlaggedCheckInResponse,
     MyCheckInResponse,
     PaginatedCheckIns,
+    PaginatedFlaggedCheckIns,
     RiskFactorResponse,
     SessionCheckInResponse,
 )
@@ -33,6 +35,13 @@ from app.services.checkin import (
 from app.services.face_mock import FaceService, get_face_service
 from app.services.audit import append_audit_log
 from app.services.face_client import FaceServiceError, FaceServiceRejected
+from app.services.ip_geolocation import (
+    IPCountryLookupError,
+    IPCountryResolver,
+    client_ip_from_request,
+    coordinates_are_in_singapore,
+    get_ip_country_resolver,
+)
 
 
 router = APIRouter(prefix="/checkins", tags=["Check-ins"])
@@ -99,13 +108,8 @@ def checkin_detail_response(
     )
 
 
-def require_session_reader(current_user: User, session: AttendanceSession) -> None:
-    if current_user.role in {UserRole.admin, UserRole.ta}:
-        return
-    if (
-        current_user.role == UserRole.instructor
-        and session.instructor_id == current_user.id
-    ):
+def require_session_reader(current_user: User) -> None:
+    if current_user.role in {UserRole.admin, UserRole.ta, UserRole.instructor}:
         return
     raise HTTPException(status_code=403, detail="Insufficient permissions")
 
@@ -117,6 +121,7 @@ async def create_checkin(
     student: User = Depends(require_roles(UserRole.student)),
     db: Session = Depends(get_db),
     face_service: FaceService = Depends(get_face_service),
+    ip_country_resolver: IPCountryResolver = Depends(get_ip_country_resolver),
 ) -> CheckInResponse:
     append_audit_log(
         db,
@@ -133,6 +138,22 @@ async def create_checkin(
     )
     # Attempts must remain in the audit trail even when later validation rejects them.
     db.commit()
+
+    singapore_only_detail = "Check-ins are only permitted from Singapore"
+    if not coordinates_are_in_singapore(payload.latitude, payload.longitude):
+        raise HTTPException(status_code=403, detail=singapore_only_detail)
+
+    try:
+        client_ip = client_ip_from_request(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=singapore_only_detail) from exc
+    if client_ip is not None and client_ip.is_global:
+        try:
+            country_code = await ip_country_resolver.country_code(str(client_ip))
+        except IPCountryLookupError as exc:
+            raise HTTPException(status_code=403, detail=singapore_only_detail) from exc
+        if country_code.upper() != "SG":
+            raise HTTPException(status_code=403, detail=singapore_only_detail)
 
     attendance_session = db.get(AttendanceSession, payload.session_id)
     if attendance_session is None:
@@ -494,8 +515,6 @@ def list_checkins(
         raise HTTPException(status_code=422, detail="Start date cannot be after end date")
 
     filters = []
-    if current_user.role == UserRole.instructor:
-        filters.append(AttendanceSession.instructor_id == current_user.id)
     for column, value in (
         (CheckIn.session_id, session_id),
         (AttendanceSession.course_id, course_id),
@@ -590,6 +609,72 @@ def list_my_checkins(
     ]
 
 
+@router.get("/flagged", response_model=PaginatedFlaggedCheckIns)
+def list_flagged_checkins(
+    course_id: str | None = None,
+    session_id: str | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    _reviewer: User = Depends(
+        require_roles(UserRole.instructor, UserRole.ta, UserRole.admin)
+    ),
+    db: Session = Depends(get_db),
+) -> PaginatedFlaggedCheckIns:
+    filters = [CheckIn.status.in_((CheckInStatus.flagged, CheckInStatus.appealed))]
+    if course_id is not None:
+        filters.append(AttendanceSession.course_id == course_id)
+    if session_id is not None:
+        filters.append(CheckIn.session_id == session_id)
+
+    total = db.scalar(
+        select(func.count())
+        .select_from(CheckIn)
+        .join(AttendanceSession, AttendanceSession.id == CheckIn.session_id)
+        .where(*filters)
+    ) or 0
+    rows = db.execute(
+        select(CheckIn, AttendanceSession.name, Course, User)
+        .join(AttendanceSession, AttendanceSession.id == CheckIn.session_id)
+        .join(Course, Course.id == AttendanceSession.course_id)
+        .join(User, User.id == CheckIn.student_id)
+        .where(*filters)
+        .order_by(
+            func.coalesce(CheckIn.appealed_at, CheckIn.checked_in_at).desc(),
+            CheckIn.id,
+        )
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return PaginatedFlaggedCheckIns(
+        items=[
+            FlaggedCheckInResponse(
+                id=checkin.id,
+                session_id=checkin.session_id,
+                session_name=session_name,
+                course_id=course.id,
+                course_code=course.code,
+                course_name=course.name,
+                student_id=checkin.student_id,
+                student_name=student.full_name,
+                student_email=student.email,
+                status=checkin.status,
+                checked_in_at=checkin.checked_in_at,
+                risk_score=checkin.risk_score,
+                risk_factors=parse_risk_factors(checkin.risk_factors),
+                reviewed_by_id=checkin.reviewed_by_id,
+                reviewed_at=checkin.reviewed_at,
+                review_notes=checkin.review_notes,
+                appeal_reason=checkin.appeal_reason,
+                appealed_at=checkin.appealed_at,
+            )
+            for checkin, session_name, course, student in rows
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
 @router.get(
     "/session/{session_id}",
     response_model=list[SessionCheckInResponse],
@@ -602,7 +687,7 @@ def list_session_checkins(
     attendance_session = db.get(AttendanceSession, session_id)
     if attendance_session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    require_session_reader(current_user, attendance_session)
+    require_session_reader(current_user)
     rows = db.execute(
         select(CheckIn, User, Device.is_trusted)
         .join(User, User.id == CheckIn.student_id)
@@ -649,7 +734,7 @@ def read_checkin(
         attendance_session = db.get(AttendanceSession, checkin.session_id)
         if attendance_session is None:
             raise HTTPException(status_code=404, detail="Session not found")
-        require_session_reader(current_user, attendance_session)
+        require_session_reader(current_user)
     return checkin_detail_response(
         checkin,
         device_trusted=device_trusted,

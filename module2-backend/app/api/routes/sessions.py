@@ -113,7 +113,6 @@ def apply_status(session: AttendanceSession, requested: SessionStatus) -> None:
 def list_sessions(
     session_status: SessionStatus | None = Query(default=None, alias="status"),
     course_id: str | None = None,
-    instructor_id: str | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
     limit: int = Query(default=50, ge=1, le=100),
@@ -124,12 +123,6 @@ def list_sessions(
     if current_user.role not in {UserRole.instructor, UserRole.admin}:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     filters = []
-    if current_user.role == UserRole.instructor:
-        filters.append(AttendanceSession.instructor_id == current_user.id)
-        if instructor_id is not None and instructor_id != current_user.id:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-    elif instructor_id is not None:
-        filters.append(AttendanceSession.instructor_id == instructor_id)
     if session_status is not None:
         filters.append(AttendanceSession.status == session_status)
     if course_id is not None:
@@ -203,10 +196,6 @@ def my_sessions(
             & (Enrollment.student_id == current_user.id)
             & Enrollment.is_active.is_(True),
         )
-    elif current_user.role == UserRole.instructor:
-        query = query.where(AttendanceSession.instructor_id == current_user.id)
-    elif current_user.role == UserRole.ta:
-        return []
     if session_status is not None:
         query = query.where(AttendanceSession.status == session_status)
     if upcoming:
@@ -245,11 +234,6 @@ def create_session(
     course = db.get(Course, payload.course_id)
     if course is None or not course.is_active:
         raise HTTPException(status_code=404, detail="Course not found")
-    if course.instructor_id is not None and course.instructor_id != instructor.id:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    if course.instructor_id is None:
-        course.instructor_id = instructor.id
-
     checkin_opens_at = payload.checkin_opens_at or payload.scheduled_start - timedelta(minutes=15)
     checkin_closes_at = payload.checkin_closes_at or payload.scheduled_start + timedelta(minutes=30)
     venue_latitude = (
@@ -269,7 +253,6 @@ def create_session(
     )
     values = payload.model_dump(exclude={"checkin_opens_at", "checkin_closes_at"})
     values.update(
-        instructor_id=instructor.id,
         checkin_opens_at=checkin_opens_at,
         checkin_closes_at=checkin_closes_at,
         venue_latitude=venue_latitude,
@@ -316,8 +299,6 @@ def update_session(
     session = db.get(AttendanceSession, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.instructor_id != instructor.id:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
     changes = payload.model_dump(exclude_unset=True)
     requested_status = changes.pop("status", None)
     scheduled_start = changes.get("scheduled_start", session.scheduled_start)
@@ -375,8 +356,6 @@ def delete_session(
     session = db.get(AttendanceSession, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.instructor_id != instructor.id:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
     if session.status != SessionStatus.scheduled:
         raise HTTPException(status_code=400, detail="Only scheduled sessions can be deleted")
     session_id_value = session.id

@@ -28,9 +28,7 @@ router = APIRouter(prefix="/enrollments", tags=["Enrollments"])
 
 def require_course_manager(
     user: User,
-    course: Course,
     *,
-    claim_unassigned: bool = False,
     allow_ta_read: bool = False,
 ) -> None:
     if user.role == UserRole.admin:
@@ -39,10 +37,6 @@ def require_course_manager(
         return
     if user.role != UserRole.instructor:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
-    if course.instructor_id is not None and course.instructor_id != user.id:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    if claim_unassigned and course.instructor_id is None:
-        course.instructor_id = user.id
 
 
 def enrollment_response(enrollment: Enrollment) -> EnrollmentResponse:
@@ -63,11 +57,9 @@ def my_enrollments(
 ) -> list[MyEnrollmentResponse]:
     if current_user.role != UserRole.student:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
-    instructor = User.__table__.alias("instructor")
     rows = db.execute(
-        select(Enrollment, Course, instructor.c.full_name)
+        select(Enrollment, Course)
         .join(Course, Course.id == Enrollment.course_id)
-        .outerjoin(instructor, instructor.c.id == Course.instructor_id)
         .where(Enrollment.student_id == current_user.id, Enrollment.is_active.is_(True))
         .order_by(Course.code)
     ).all()
@@ -77,9 +69,8 @@ def my_enrollments(
             course_code=course.code,
             course_name=course.name,
             semester=course.semester,
-            instructor_name=instructor_name,
         )
-        for enrollment, course, instructor_name in rows
+        for enrollment, course in rows
     ]
 
 
@@ -94,7 +85,7 @@ def course_enrollments(
     course = db.get(Course, course_id)
     if course is None:
         raise HTTPException(status_code=404, detail="Course not found")
-    require_course_manager(current_user, course, allow_ta_read=True)
+    require_course_manager(current_user, allow_ta_read=True)
 
     filters = [Enrollment.course_id == course.id]
     if is_active is not None:
@@ -140,7 +131,7 @@ def create_enrollment(
     course = db.get(Course, payload.course_id)
     if course is None or not course.is_active:
         raise HTTPException(status_code=404, detail="Course not found")
-    require_course_manager(current_user, course, claim_unassigned=True)
+    require_course_manager(current_user)
     enrollment = create_or_reactivate_enrollment(
         db,
         student_id=payload.student_id,
@@ -171,7 +162,7 @@ def bulk_enrollments(
     course = db.get(Course, payload.course_id)
     if course is None or not course.is_active:
         raise HTTPException(status_code=404, detail="Course not found")
-    require_course_manager(current_user, course, claim_unassigned=True)
+    require_course_manager(current_user)
     if payload.create_accounts:
         raise HTTPException(
             status_code=400,
@@ -239,7 +230,7 @@ def delete_enrollment(
     course = db.get(Course, enrollment.course_id)
     if course is None:
         raise HTTPException(status_code=404, detail="Course not found")
-    require_course_manager(current_user, course)
+    require_course_manager(current_user)
     enrollment.is_active = False
     enrollment.dropped_at = datetime.now(timezone.utc)
     append_audit_log(

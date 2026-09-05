@@ -58,3 +58,19 @@ def test_session_attendance_summary_and_authorization(
         ).status_code
         == 200
     )
+
+    other_payload = {
+        "email": "other-stats-instructor@example.com",
+        "password": "testpassword123",
+        "full_name": "Other Stats Instructor",
+        "role": "instructor",
+    }
+    assert client.post("/api/v1/auth/register", json=other_payload).status_code == 201
+    other_token = client.post(
+        "/api/v1/auth/login",
+        json={"email": other_payload["email"], "password": other_payload["password"]},
+    ).json()["access_token"]
+    assert client.get(
+        f"/api/v1/stats/sessions/{session['id']}",
+        headers={"Authorization": f"Bearer {other_token}"},
+    ).status_code == 200

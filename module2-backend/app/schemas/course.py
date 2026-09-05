@@ -7,7 +7,6 @@ class CourseFields(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=5000)
     semester: str = Field(min_length=1, max_length=20)
-    instructor_id: str | None = None
     venue_latitude: float | None = Field(default=None, ge=-90, le=90)
     venue_longitude: float | None = Field(default=None, ge=-180, le=180)
     venue_name: str | None = Field(default=None, max_length=255)
@@ -55,7 +54,6 @@ class CourseUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=5000)
     semester: str | None = Field(default=None, min_length=1, max_length=20)
-    instructor_id: str | None = None
     venue_latitude: float | None = Field(default=None, ge=-90, le=90)
     venue_longitude: float | None = Field(default=None, ge=-180, le=180)
     venue_name: str | None = Field(default=None, max_length=255)
@@ -97,8 +95,6 @@ class CourseResponse(BaseModel):
     name: str
     description: str | None
     semester: str
-    instructor_id: str | None
-    instructor_name: str | None = None
     venue_latitude: float | None
     venue_longitude: float | None
     venue_name: str | None
