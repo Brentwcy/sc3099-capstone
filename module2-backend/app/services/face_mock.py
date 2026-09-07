@@ -1,10 +1,17 @@
+import hashlib
 from functools import lru_cache
 
 from fastapi import Depends
 
 from app.core.config import Settings, get_settings
-from app.schemas.face import FaceEnrollResult, FaceVerifyResult, LivenessResult
+from app.schemas.face import (
+    BiometricRiskResult,
+    FaceEnrollResult,
+    FaceVerifyResult,
+    LivenessResult,
+)
 from app.services.face_client import FaceService, HttpFaceService
+
 
 class ContractCompatibleFaceServiceMock:
     """Deterministic Week 4 stand-in; it never persists or logs image data."""
@@ -14,7 +21,11 @@ class ContractCompatibleFaceServiceMock:
     ) -> FaceEnrollResult:
         return FaceEnrollResult(
             enrollment_successful=camera_consent,
-            face_template_hash=None,
+            face_template_hash=(
+                hashlib.sha256(f"mock-face:{user_id}".encode()).hexdigest()
+                if camera_consent
+                else None
+            ),
             quality_score=0.92,
             details={"provider": "module3-contract-mock"},
         )
@@ -27,6 +38,7 @@ class ContractCompatibleFaceServiceMock:
             match_score=0.92,
             match_threshold=0.7,
             face_detected=True,
+            face_count=1,
         )
 
     async def check_liveness(
@@ -41,6 +53,33 @@ class ContractCompatibleFaceServiceMock:
             liveness_threshold=0.6,
             challenge_type=challenge_type,
             details={"provider": "module3-week4-mock"},
+        )
+
+    async def assess_biometric_risk(
+        self, *, liveness_score: float, face_match_score: float
+    ) -> BiometricRiskResult:
+        risk_score = round(
+            0.5 * (1.0 - liveness_score) + 0.5 * (1.0 - face_match_score),
+            4,
+        )
+        if risk_score < 0.3:
+            risk_level = "LOW"
+        elif risk_score < 0.5:
+            risk_level = "MEDIUM"
+        elif risk_score < 0.7:
+            risk_level = "HIGH"
+        else:
+            risk_level = "CRITICAL"
+        return BiometricRiskResult(
+            risk_score=risk_score,
+            risk_level=risk_level,
+            pass_threshold=risk_score < 0.5,
+            risk_threshold=0.5,
+            signal_breakdown={
+                "liveness": round(0.5 * (1.0 - liveness_score), 4),
+                "face_match": round(0.5 * (1.0 - face_match_score), 4),
+            },
+            recommendations=[],
         )
 
 

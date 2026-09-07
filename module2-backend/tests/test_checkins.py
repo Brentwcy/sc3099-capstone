@@ -2,15 +2,31 @@ import json
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+import pytest
+
 from app.models.audit_log import AuditLog
 from app.models.checkin import CheckIn, CheckInStatus
 from app.models.risk_signal import RiskSignal
 from app.models.session import AttendanceSession
 from app.models.user import User
-from app.schemas.face import FaceVerifyResult
+from app.schemas.face import BiometricRiskResult, FaceVerifyResult
 from app.main import app
 from app.services.face_mock import LivenessResult, get_face_service
+from app.services.face_client import FaceServiceUnavailable
 from app.services.ip_geolocation import IPCountryLookupError, get_ip_country_resolver
+
+
+def biometric_risk_result(liveness_score, face_match_score):
+    risk_score = round(
+        0.5 * (1.0 - liveness_score) + 0.5 * (1.0 - face_match_score),
+        4,
+    )
+    return BiometricRiskResult(
+        risk_score=risk_score,
+        risk_level="LOW" if risk_score < 0.3 else "HIGH",
+        pass_threshold=risk_score < 0.5,
+        signal_breakdown={},
+    )
 
 
 def create_checkin_setup(
@@ -92,6 +108,13 @@ def checkin_payload(session_id, **overrides):
     }
     payload.update(overrides)
     return payload
+
+
+def assert_marker_not_persisted(db_session, marker):
+    for model in (User, CheckIn, RiskSignal, AuditLog):
+        for row in db_session.query(model).all():
+            for column in model.__table__.columns:
+                assert marker not in str(getattr(row, column.name) or "")
 
 
 def test_student_can_list_and_filter_own_checkins(
@@ -203,7 +226,7 @@ def test_atomic_checkin_uses_mock_and_persists_risk_signals(
     assert body["status"] == "approved"
     assert body["liveness_passed"] is True
     assert body["liveness_score"] == 0.92
-    assert body["risk_score"] == 0.15
+    assert body["risk_score"] == 0.22
     assert body["risk_factors"][0]["type"] == "device_unknown"
     assert body["distance_from_venue_meters"] == 0
     assert db_session.query(CheckIn).count() == 1
@@ -211,7 +234,7 @@ def test_atomic_checkin_uses_mock_and_persists_risk_signals(
     signal = db_session.query(RiskSignal).one()
     assert signal.checkin_id == body["id"]
     assert signal.signal_type.value == "device_unknown"
-    assert signal.weight == 0.15
+    assert signal.weight == 0.20
     assert db_session.query(AuditLog).filter_by(action="checkin_attempted").count() == 1
     approved_audit = db_session.query(AuditLog).filter_by(action="checkin_approved").one()
     assert approved_audit.resource_id == body["id"]
@@ -351,6 +374,74 @@ def test_face_matching_uses_enrolled_template(
     student,
     instructor,
     admin,
+    caplog,
+):
+    student_user, student_headers = student
+    instructor_user, instructor_headers = instructor
+    _admin_user, admin_headers = admin
+    _course, session = create_checkin_setup(
+        client,
+        student_user=student_user,
+        student_headers=student_headers,
+        instructor_user=instructor_user,
+        instructor_headers=instructor_headers,
+        admin_headers=admin_headers,
+    )
+    persisted_student = db_session.get(User, student_user["id"])
+    persisted_student.face_enrolled = True
+    persisted_student.face_embedding_hash = "a" * 64
+    persisted_session = db_session.get(AttendanceSession, session["id"])
+    persisted_session.require_face_match = True
+    db_session.commit()
+    image_marker = "week6-sensitive-checkin-image-never-persist"
+
+    class MatchingFaceService:
+        async def check_liveness(self, **_kwargs):
+            return LivenessResult(
+                liveness_passed=True,
+                liveness_score=0.9,
+                challenge_type="passive",
+                face_embedding_hash="b" * 64,
+            )
+
+        async def verify_face(self, *, image, reference_template_hash):
+            assert image == image_marker
+            assert reference_template_hash == "a" * 64
+            return FaceVerifyResult(
+                match_passed=True,
+                match_score=0.94,
+                match_threshold=0.7,
+                face_detected=True,
+            )
+
+        async def assess_biometric_risk(self, *, liveness_score, face_match_score):
+            return biometric_risk_result(liveness_score, face_match_score)
+
+    app.dependency_overrides[get_face_service] = lambda: MatchingFaceService()
+    response = client.post(
+        "/api/v1/checkins/",
+        headers=student_headers,
+        json=checkin_payload(
+            session["id"],
+            liveness_challenge_response=image_marker,
+        ),
+    )
+    app.dependency_overrides.pop(get_face_service, None)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["face_match_passed"] is True
+    assert response.json()["face_match_score"] == 0.94
+    assert image_marker not in response.text
+    assert_marker_not_persisted(db_session, image_marker)
+    assert image_marker not in caplog.text
+
+
+def test_face_mismatch_is_rejected_and_persisted_as_risk_signal(
+    client,
+    db_session,
+    student,
+    instructor,
+    admin,
 ):
     student_user, student_headers = student
     instructor_user, instructor_headers = instructor
@@ -370,7 +461,7 @@ def test_face_matching_uses_enrolled_template(
     persisted_session.require_face_match = True
     db_session.commit()
 
-    class MatchingFaceService:
+    class MismatchingFaceService:
         async def check_liveness(self, **_kwargs):
             return LivenessResult(
                 liveness_passed=True,
@@ -379,17 +470,18 @@ def test_face_matching_uses_enrolled_template(
                 face_embedding_hash="b" * 64,
             )
 
-        async def verify_face(self, *, image, reference_template_hash):
-            assert image == "base64-test-image"
-            assert reference_template_hash == "a" * 64
+        async def verify_face(self, **_kwargs):
             return FaceVerifyResult(
-                match_passed=True,
-                match_score=0.94,
+                match_passed=False,
+                match_score=0.1,
                 match_threshold=0.7,
                 face_detected=True,
             )
 
-    app.dependency_overrides[get_face_service] = lambda: MatchingFaceService()
+        async def assess_biometric_risk(self, *, liveness_score, face_match_score):
+            return biometric_risk_result(liveness_score, face_match_score)
+
+    app.dependency_overrides[get_face_service] = lambda: MismatchingFaceService()
     response = client.post(
         "/api/v1/checkins/",
         headers=student_headers,
@@ -398,8 +490,135 @@ def test_face_matching_uses_enrolled_template(
     app.dependency_overrides.pop(get_face_service, None)
 
     assert response.status_code == 201, response.text
-    assert response.json()["face_match_passed"] is True
-    assert response.json()["face_match_score"] == 0.94
+    assert response.json()["status"] == "rejected"
+    assert "face_match_failed" in {
+        factor["type"] for factor in response.json()["risk_factors"]
+    }
+    signal = db_session.query(RiskSignal).filter_by(
+        signal_type="face_match_failed"
+    ).one()
+    assert signal.severity.value == "critical"
+
+
+@pytest.mark.parametrize(
+    ("face_detected", "face_count", "failure_reason"),
+    [
+        (False, 0, "no_face"),
+        (True, 2, "multiple_faces"),
+    ],
+)
+def test_non_single_face_verification_is_rejected_with_reason(
+    client,
+    db_session,
+    student,
+    instructor,
+    admin,
+    face_detected,
+    face_count,
+    failure_reason,
+):
+    student_user, student_headers = student
+    instructor_user, instructor_headers = instructor
+    _admin_user, admin_headers = admin
+    _course, session = create_checkin_setup(
+        client,
+        student_user=student_user,
+        student_headers=student_headers,
+        instructor_user=instructor_user,
+        instructor_headers=instructor_headers,
+        admin_headers=admin_headers,
+    )
+    persisted_student = db_session.get(User, student_user["id"])
+    persisted_student.face_enrolled = True
+    persisted_student.face_embedding_hash = "a" * 64
+    persisted_session = db_session.get(AttendanceSession, session["id"])
+    persisted_session.require_face_match = True
+    db_session.commit()
+
+    class NonSingleFaceService:
+        async def check_liveness(self, **_kwargs):
+            return LivenessResult(
+                liveness_passed=True,
+                liveness_score=0.9,
+                challenge_type="passive",
+            )
+
+        async def verify_face(self, **_kwargs):
+            return FaceVerifyResult(
+                match_passed=False,
+                match_score=0.0,
+                match_threshold=0.7,
+                face_detected=face_detected,
+                face_count=face_count,
+                failure_reason=failure_reason,
+            )
+
+        async def assess_biometric_risk(self, *, liveness_score, face_match_score):
+            return biometric_risk_result(liveness_score, face_match_score)
+
+    app.dependency_overrides[get_face_service] = lambda: NonSingleFaceService()
+    response = client.post(
+        "/api/v1/checkins/",
+        headers=student_headers,
+        json=checkin_payload(session["id"]),
+    )
+    app.dependency_overrides.pop(get_face_service, None)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "rejected"
+    factor = next(
+        item
+        for item in response.json()["risk_factors"]
+        if item["type"] == "face_match_failed"
+    )
+    assert factor["details"] == {
+        "failure_reason": failure_reason,
+        "face_count": face_count,
+    }
+
+
+def test_face_service_timeout_is_sanitized_and_leaves_no_partial_checkin(
+    client,
+    db_session,
+    student,
+    instructor,
+    admin,
+):
+    student_user, student_headers = student
+    instructor_user, instructor_headers = instructor
+    _admin_user, admin_headers = admin
+    _course, session = create_checkin_setup(
+        client,
+        student_user=student_user,
+        student_headers=student_headers,
+        instructor_user=instructor_user,
+        instructor_headers=instructor_headers,
+        admin_headers=admin_headers,
+    )
+    image_marker = "week6-private-timeout-image"
+
+    class UnavailableFaceService:
+        async def check_liveness(self, **_kwargs):
+            raise FaceServiceUnavailable("Face service timed out")
+
+    app.dependency_overrides[get_face_service] = lambda: UnavailableFaceService()
+    response = client.post(
+        "/api/v1/checkins/",
+        headers=student_headers,
+        json=checkin_payload(
+            session["id"],
+            liveness_challenge_response=image_marker,
+        ),
+    )
+    app.dependency_overrides.pop(get_face_service, None)
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Face service timed out"}
+    assert image_marker not in response.text
+    assert db_session.query(CheckIn).count() == 0
+    assert db_session.query(RiskSignal).count() == 0
+    assert db_session.query(AuditLog).filter_by(action="checkin_attempted").count() == 1
+    assert_marker_not_persisted(db_session, image_marker)
 
 
 def test_checkin_validation_failures_leave_no_partial_records(
@@ -494,7 +713,15 @@ def test_outside_geofence_and_failed_liveness_are_rejected(
                 liveness_passed=False,
                 liveness_score=0.1,
                 challenge_type="passive",
+                details={
+                    "face_detected": True,
+                    "face_count": 2,
+                    "failure_reason": "multiple_faces",
+                },
             )
+
+        async def assess_biometric_risk(self, *, liveness_score, face_match_score):
+            return biometric_risk_result(liveness_score, face_match_score)
 
     app.dependency_overrides[get_face_service] = lambda: FailedLivenessService()
     failed_liveness = client.post(
@@ -507,6 +734,15 @@ def test_outside_geofence_and_failed_liveness_are_rejected(
     assert failed_liveness.json()["status"] == "rejected"
     assert "liveness_failed" in {
         factor["type"] for factor in failed_liveness.json()["risk_factors"]
+    }
+    liveness_factor = next(
+        factor
+        for factor in failed_liveness.json()["risk_factors"]
+        if factor["type"] == "liveness_failed"
+    )
+    assert liveness_factor["details"] == {
+        "failure_reason": "multiple_faces",
+        "face_count": 2,
     }
     assert db_session.query(CheckIn).count() == 2
 
@@ -576,8 +812,8 @@ def test_session_and_detail_queries_enforce_role_access(
         params={
             "session_id": session["id"],
             "status": "approved",
-            "min_risk_score": 0.1,
-            "max_risk_score": 0.2,
+            "min_risk_score": 0.2,
+            "max_risk_score": 0.3,
         },
     )
     assert filtered.status_code == 200, filtered.text

@@ -9,7 +9,12 @@ from pydantic import BaseModel, Field, model_validator
 class FaceEnrollRequest(BaseModel):
     """Request model for face enrollment."""
     user_id: str = Field(..., description="UUID of the user being enrolled")
-    image: str = Field(..., description="Base64 encoded face image")
+    image: str = Field(
+        ...,
+        min_length=1,
+        max_length=15_000_000,
+        description="Base64 encoded face image",
+    )
     camera_consent: bool = Field(False, description="User consent for camera and biometric processing")
 
 
@@ -23,7 +28,12 @@ class FaceEnrollResponse(BaseModel):
 
 class FaceVerifyRequest(BaseModel):
     """Request model for face verification."""
-    image: str = Field(..., description="Base64 encoded image to verify")
+    image: str = Field(
+        ...,
+        min_length=1,
+        max_length=15_000_000,
+        description="Base64 encoded image to verify",
+    )
     reference_template_hash: str | None = Field(None, description="64-char SHA-256 template hash from enrollment")
     reference_hash: str | None = Field(None, description="Legacy field name for reference_template_hash")
 
@@ -44,15 +54,46 @@ class FaceVerifyResponse(BaseModel):
     match_score: float = Field(..., description="Similarity score between 0.0 and 1.0")
     match_threshold: float = Field(0.70, description="Threshold required for match pass")
     face_detected: bool = True
+    face_count: int = Field(1, ge=0, description="Number of faces detected")
+    failure_reason: str | None = Field(
+        None,
+        description="invalid_image, no_face, multiple_faces, or face_mismatch",
+    )
     current_template_hash: str = Field("", description="SHA-256 hash of the verification image")
     face_embedding_hash: str | None = Field(None, description="Alias for current_template_hash")
+
+    @model_validator(mode="after")
+    def validate_face_count_result(self):
+        if self.match_passed and (not self.face_detected or self.face_count != 1):
+            raise ValueError("A successful match requires exactly one detected face")
+        if self.failure_reason == "no_face" and (
+            self.face_detected or self.face_count != 0
+        ):
+            raise ValueError("no_face requires face_detected=false and face_count=0")
+        if self.failure_reason == "multiple_faces" and (
+            not self.face_detected or self.face_count < 2
+        ):
+            raise ValueError(
+                "multiple_faces requires face_detected=true and face_count>=2"
+            )
+        return self
 
 
 class LivenessRequest(BaseModel):
     """Request model for liveness check."""
-    challenge_response: str = Field(..., description="Base64 encoded face image")
+    challenge_response: str = Field(
+        ...,
+        min_length=1,
+        max_length=15_000_000,
+        description="Base64 encoded face image",
+    )
     challenge_type: str = Field("passive", description="passive, blink, or head_turn")
-    initial_image: Optional[str] = Field(None, description="Initial frame for active challenge comparison")
+    initial_image: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=15_000_000,
+        description="Initial frame for active challenge comparison",
+    )
 
     @model_validator(mode="after")
     def validate_challenge(self):

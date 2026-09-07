@@ -68,6 +68,7 @@ app.add_middleware(
 #   GET    /checkins/
 #   GET    /checkins/my-checkins
 #   GET    /checkins/flagged
+#   POST   /checkins/{checkin_id}/review
 #   GET    /checkins/session/{session_id}
 #   GET    /checkins/{checkin_id}
 #

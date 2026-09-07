@@ -8,6 +8,12 @@ from app.models.risk_signal import RiskSeverity, RiskSignalType
 
 
 EARTH_RADIUS_METERS = 6_371_000.0
+OVERALL_RISK_WEIGHTS = {
+    "biometric": 0.50,
+    "device_attestation": 0.20,
+    "geolocation": 0.15,
+    "network": 0.15,
+}
 
 
 def haversine_distance_meters(
@@ -53,3 +59,27 @@ class InitialRiskFactor:
 
 def initial_risk_score(factors: list[InitialRiskFactor]) -> float:
     return round(min(sum(factor.weight * factor.confidence for factor in factors), 1.0), 4)
+
+
+def aggregate_risk_score(
+    *,
+    biometric_risk: float,
+    device_attestation_risk: float,
+    geolocation_risk: float,
+    network_risk: float,
+) -> float:
+    """Aggregate Module 3 biometrics with the signals owned by Module 2."""
+    signals = {
+        "biometric": biometric_risk,
+        "device_attestation": device_attestation_risk,
+        "geolocation": geolocation_risk,
+        "network": network_risk,
+    }
+    for name, value in signals.items():
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"{name} risk must be between 0 and 1")
+
+    return round(
+        sum(signals[name] * weight for name, weight in OVERALL_RISK_WEIGHTS.items()),
+        4,
+    )

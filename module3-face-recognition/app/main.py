@@ -10,6 +10,7 @@ Production implementation providing:
 """
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .config import settings
 from .logging_config import logger
@@ -60,14 +61,21 @@ setup_telemetry(app, settings.OTEL_EXPORTER_OTLP_ENDPOINT)
 # ROOT & HEALTH ENDPOINTS
 # =============================================================================
 
-@app.get("/health", status_code=status.HTTP_200_OK)
-async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": settings.SERVICE_NAME,
-        "version": settings.VERSION
-    }
+@app.get("/health", response_model=None)
+async def health_check() -> JSONResponse:
+    """Report ready only when the face model initialized successfully."""
+    ready = face_engine.is_ready
+    return JSONResponse(
+        status_code=(
+            status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE
+        ),
+        content={
+            "status": "healthy" if ready else "unhealthy",
+            "service": settings.SERVICE_NAME,
+            "version": settings.VERSION,
+            "face_engine": "healthy" if ready else "unavailable",
+        },
+    )
 
 
 @app.get("/", status_code=status.HTTP_200_OK)
@@ -111,13 +119,25 @@ async def enroll_face(request: FaceEnrollRequest):
             detail="Invalid or unreadable image data"
         )
 
-    landmarks = face_engine.extract_landmarks(image_rgb)
-    if landmarks is None:
+    faces = face_engine.extract_faces(image_rgb)
+    if not faces:
         logger.warning("Enrollment failed: No face detected", user_id=request.user_id)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No face detected in submitted image"
         )
+    if len(faces) > 1:
+        logger.warning(
+            "Enrollment failed: Multiple faces detected",
+            user_id=request.user_id,
+            face_count=len(faces),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Multiple faces detected in submitted image",
+        )
+
+    landmarks = faces[0]
 
     quality_score, details = face_engine.calculate_quality_score(image_rgb, landmarks)
     embedding = face_engine.extract_embedding(landmarks)
@@ -159,20 +179,37 @@ async def verify_face(request: FaceVerifyRequest):
             match_score=0.0,
             match_threshold=settings.FACE_MATCH_THRESHOLD,
             face_detected=False,
+            face_count=0,
+            failure_reason="invalid_image",
             current_template_hash="",
             face_embedding_hash=""
         )
 
-    landmarks = face_engine.extract_landmarks(image_rgb)
-    if landmarks is None:
+    faces = face_engine.extract_faces(image_rgb)
+    if not faces:
         return FaceVerifyResponse(
             match_passed=False,
             match_score=0.0,
             match_threshold=settings.FACE_MATCH_THRESHOLD,
             face_detected=False,
+            face_count=0,
+            failure_reason="no_face",
             current_template_hash="",
             face_embedding_hash=""
         )
+    if len(faces) > 1:
+        return FaceVerifyResponse(
+            match_passed=False,
+            match_score=0.0,
+            match_threshold=settings.FACE_MATCH_THRESHOLD,
+            face_detected=True,
+            face_count=len(faces),
+            failure_reason="multiple_faces",
+            current_template_hash="",
+            face_embedding_hash="",
+        )
+
+    landmarks = faces[0]
 
     current_embedding = face_engine.extract_embedding(landmarks)
     current_hash = face_engine.generate_face_hash(current_embedding)
@@ -203,6 +240,8 @@ async def verify_face(request: FaceVerifyRequest):
         match_score=round(match_score, 4),
         match_threshold=settings.FACE_MATCH_THRESHOLD,
         face_detected=True,
+        face_count=1,
+        failure_reason=None if match_passed else "face_mismatch",
         current_template_hash=current_hash,
         face_embedding_hash=current_hash
     )
@@ -231,24 +270,76 @@ async def check_liveness(request: LivenessRequest):
             liveness_threshold=settings.LIVENESS_THRESHOLD,
             challenge_type=request.challenge_type,
             face_embedding_hash="",
-            details={"error": "Invalid image"}
+            details={
+                "face_detected": False,
+                "face_count": 0,
+                "failure_reason": "invalid_image",
+            },
         )
 
-    landmarks = face_engine.extract_landmarks(image_rgb)
-    if landmarks is None:
+    faces = face_engine.extract_faces(image_rgb)
+    if not faces:
         return LivenessResponse(
             liveness_passed=False,
             liveness_score=0.0,
             liveness_threshold=settings.LIVENESS_THRESHOLD,
             challenge_type=request.challenge_type,
             face_embedding_hash="",
-            details={"face_detected": False}
+            details={
+                "face_detected": False,
+                "face_count": 0,
+                "failure_reason": "no_face",
+            }
         )
+    if len(faces) > 1:
+        return LivenessResponse(
+            liveness_passed=False,
+            liveness_score=0.0,
+            liveness_threshold=settings.LIVENESS_THRESHOLD,
+            challenge_type=request.challenge_type,
+            face_embedding_hash="",
+            details={
+                "face_detected": True,
+                "face_count": len(faces),
+                "failure_reason": "multiple_faces",
+            },
+        )
+
+    landmarks = faces[0]
 
     initial_landmarks = None
     if request.initial_image:
         initial_rgb = decode_base64_image(request.initial_image)
-        initial_landmarks = face_engine.extract_landmarks(initial_rgb) if initial_rgb is not None else None
+        initial_faces = (
+            face_engine.extract_faces(initial_rgb) if initial_rgb is not None else []
+        )
+        if not initial_faces:
+            return LivenessResponse(
+                liveness_passed=False,
+                liveness_score=0.0,
+                liveness_threshold=settings.LIVENESS_THRESHOLD,
+                challenge_type=request.challenge_type,
+                face_embedding_hash="",
+                details={
+                    "face_detected": False,
+                    "face_count": 0,
+                    "failure_reason": "no_face_initial_image",
+                },
+            )
+        if len(initial_faces) > 1:
+            return LivenessResponse(
+                liveness_passed=False,
+                liveness_score=0.0,
+                liveness_threshold=settings.LIVENESS_THRESHOLD,
+                challenge_type=request.challenge_type,
+                face_embedding_hash="",
+                details={
+                    "face_detected": True,
+                    "face_count": len(initial_faces),
+                    "failure_reason": "multiple_faces_initial_image",
+                },
+            )
+        initial_landmarks = initial_faces[0]
 
     liveness_score, liveness_passed, details = liveness_engine.evaluate_liveness(
         image_rgb=image_rgb,

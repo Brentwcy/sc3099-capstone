@@ -188,8 +188,11 @@ contain `{ip}`) and `IP_COUNTRY_LOOKUP_TIMEOUT_SECONDS`.
 | Requirement | Implementation |
 |-------------|----------------|
 | No raw images | Process in memory, never store |
-| Hash-only storage | SHA-256 of face embedding (64 hex chars) |
+| Module 2 persistent storage | SHA-256 template identifier only (64 hex chars) |
+| Module 3 matching state | Protected SimHash only; no raw landmarks or image bytes |
 | No BLOB columns | No binary data in main tables |
+| Image request bound | Maximum 15,000,000 encoded characters |
+| Service logs | Never include image bodies, template values, or connection URLs |
 
 **Face Hash Generation:**
 ```python
@@ -198,6 +201,11 @@ import hashlib
 def generate_face_hash(embedding: bytes) -> str:
     return hashlib.sha256(embedding).hexdigest()
 ```
+
+The SHA-256 value is a lookup identifier, not an approximate face-matching
+template. Module 3 currently caches a protected SimHash under that identifier;
+durable protected-template storage and missing-template behavior must be frozen
+with the Module 3 owner before production use.
 
 ### Consent Tracking
 

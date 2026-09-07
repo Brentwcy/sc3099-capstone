@@ -362,6 +362,44 @@ class APIClient:
         )
         return self._response_object(response)
 
+    def get_flagged_checkins(
+        self,
+        access_token: str,
+        *,
+        course_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return the actionable flagged and appealed review queue."""
+        response = self.get(
+            "/api/v1/checkins/flagged",
+            params=self._defined_params(
+                course_id=course_id,
+                session_id=session_id,
+                limit=limit,
+                offset=offset,
+            ),
+            access_token=access_token,
+        )
+        return self._response_object(response)
+
+    def review_checkin(
+        self,
+        access_token: str,
+        checkin_id: str,
+        *,
+        status: str,
+        review_notes: str,
+    ) -> dict[str, Any]:
+        """Submit an approve or reject decision for one review item."""
+        response = self.post(
+            f"/api/v1/checkins/{checkin_id}/review",
+            json={"status": status, "review_notes": review_notes},
+            access_token=access_token,
+        )
+        return self._response_object(response)
+
     def get_session_checkins(
         self,
         access_token: str,

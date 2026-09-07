@@ -5,6 +5,7 @@ from typing import Any
 import streamlit as st
 
 from pages.admin_overview import render_admin_overview
+from pages.flagged_review import render_flagged_review
 from pages.instructor_overview import render_instructor_overview
 from pages.shells import render_shell
 from pages.student_attendance import render_student_attendance
@@ -27,5 +28,7 @@ def render_page(page_name: str, current_user: dict[str, Any]) -> None:
         render_instructor_overview(current_user)
     elif resolved_page == "Overview" and st.session_state.role == "admin":
         render_admin_overview(current_user)
+    elif resolved_page == "Flagged Review":
+        render_flagged_review(current_user)
     else:
         render_shell(resolved_page, st.session_state.role)

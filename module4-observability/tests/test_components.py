@@ -123,6 +123,19 @@ class FeedbackComponentTests(unittest.TestCase):
 
         warning.assert_called_once_with("Too many requests. Please try again later.")
 
+    def test_conflict_error_maps_to_safe_stale_item_message(self) -> None:
+        error = APIResponseError(
+            status_code=409,
+            detail="private concurrent decision details",
+        )
+
+        with patch.object(fake_streamlit, "warning", create=True) as warning:
+            render_api_error(error)
+
+        warning.assert_called_once_with(
+            "This item has already been updated. Refresh and try again."
+        )
+
     def test_generic_api_errors_do_not_expose_internal_details(self) -> None:
         errors = (
             APIResponseError(status_code=500, detail="database-password=secret"),

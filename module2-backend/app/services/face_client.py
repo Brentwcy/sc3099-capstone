@@ -4,6 +4,8 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.schemas.face import (
+    BiometricRiskRequest,
+    BiometricRiskResult,
     FaceEnrollRequest,
     FaceEnrollResult,
     FaceVerifyRequest,
@@ -44,6 +46,10 @@ class FaceService(Protocol):
         challenge_response: str,
         challenge_type: str = "passive",
     ) -> LivenessResult: ...
+
+    async def assess_biometric_risk(
+        self, *, liveness_score: float, face_match_score: float
+    ) -> BiometricRiskResult: ...
 
 
 ResponseModel = TypeVar("ResponseModel", bound=BaseModel)
@@ -138,6 +144,18 @@ class HttpFaceService:
                 challenge_type=challenge_type,
             ),
             LivenessResult,
+        )
+
+    async def assess_biometric_risk(
+        self, *, liveness_score: float, face_match_score: float
+    ) -> BiometricRiskResult:
+        return await self._post(
+            "/risk/assess",
+            BiometricRiskRequest(
+                liveness_score=liveness_score,
+                face_match_score=face_match_score,
+            ),
+            BiometricRiskResult,
         )
 
     async def aclose(self) -> None:

@@ -19,6 +19,9 @@ def render_api_error(error: APIClientError) -> None:
         if error.status_code == 429:
             st.warning("Too many requests. Please try again later.")
             return
+        if error.status_code == 409:
+            st.warning("This item has already been updated. Refresh and try again.")
+            return
         st.error("The server could not complete the request. Please try again later.")
         return
 

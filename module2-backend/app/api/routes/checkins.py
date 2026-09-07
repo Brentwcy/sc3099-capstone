@@ -19,6 +19,8 @@ from app.schemas.checkin import (
     CheckInCreate,
     CheckInDetailResponse,
     CheckInListItemResponse,
+    CheckInReviewRequest,
+    CheckInReviewResponse,
     CheckInResponse,
     FlaggedCheckInResponse,
     MyCheckInResponse,
@@ -29,8 +31,8 @@ from app.schemas.checkin import (
 )
 from app.services.checkin import (
     InitialRiskFactor,
+    aggregate_risk_score,
     haversine_distance_meters,
-    initial_risk_score,
 )
 from app.services.face_mock import FaceService, get_face_service
 from app.services.audit import append_audit_log
@@ -211,12 +213,13 @@ async def create_checkin(
     reused_device = bool(
         fingerprinted_device is not None and fingerprinted_device.user_id != student.id
     )
+    device_attestation_risk = 1.0
     if reused_device:
         factors.append(
             InitialRiskFactor(
                 RiskSignalType.pattern_anomaly,
                 RiskSeverity.high,
-                0.50,
+                0.20,
                 details={"reason": "device_fingerprint_bound_to_another_account"},
             )
         )
@@ -225,11 +228,19 @@ async def create_checkin(
             InitialRiskFactor(
                 RiskSignalType.device_unknown,
                 RiskSeverity.medium,
-                0.15,
+                0.20,
             )
         )
     else:
-        if not device.is_trusted:
+        device_attestation_risk = float(
+            not (
+                device.is_trusted
+                and device.attestation_passed
+                and not device.is_emulator
+                and not device.is_rooted_jailbroken
+            )
+        )
+        if not device.is_trusted or not device.attestation_passed:
             factors.append(
                 InitialRiskFactor(
                     RiskSignalType.attestation_failed,
@@ -260,6 +271,7 @@ async def create_checkin(
     distance: float | None = None
     outside_geofence = False
     far_outside_geofence = False
+    geolocation_risk = 0.0
     if (
         venue_latitude is not None
         and venue_longitude is not None
@@ -274,13 +286,14 @@ async def create_checkin(
         outside_geofence = distance > geofence_radius
         far_outside_geofence = distance > geofence_radius * 2
         if outside_geofence:
+            geolocation_risk = 1.0
             factors.append(
                 InitialRiskFactor(
                     RiskSignalType.geo_out_of_bounds,
                     RiskSeverity.critical
                     if far_outside_geofence
                     else RiskSeverity.high,
-                    0.40,
+                    0.15,
                     details={
                         "distance_meters": round(distance, 2),
                         "geofence_radius_meters": geofence_radius,
@@ -291,11 +304,12 @@ async def create_checkin(
             payload.location_accuracy_meters is not None
             and payload.location_accuracy_meters > geofence_radius
         ):
+            geolocation_risk = 1.0
             factors.append(
                 InitialRiskFactor(
                     RiskSignalType.geo_accuracy_low,
                     RiskSeverity.medium,
-                    0.10,
+                    0.15,
                     details={
                         "accuracy_meters": payload.location_accuracy_meters,
                     },
@@ -325,12 +339,18 @@ async def create_checkin(
         except FaceServiceError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
         if liveness_result.liveness_passed is False:
+            liveness_failure_details = {
+                key: liveness_result.details[key]
+                for key in ("failure_reason", "face_count")
+                if key in liveness_result.details
+            }
             factors.append(
                 InitialRiskFactor(
                     RiskSignalType.liveness_failed,
                     RiskSeverity.critical,
                     0.25,
                     confidence=1.0 - liveness_result.liveness_score,
+                    details=liveness_failure_details or None,
                 )
             )
         elif liveness_result.liveness_score < liveness_result.liveness_threshold:
@@ -367,12 +387,22 @@ async def create_checkin(
         except FaceServiceError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
         if not face_match_result.match_passed:
+            face_failure_details = {
+                "failure_reason": face_match_result.failure_reason
+                or (
+                    "no_face"
+                    if not face_match_result.face_detected
+                    else "face_mismatch"
+                ),
+                "face_count": face_match_result.face_count,
+            }
             factors.append(
                 InitialRiskFactor(
                     RiskSignalType.face_match_failed,
                     RiskSeverity.critical,
-                    0.35,
+                    0.25,
                     confidence=1.0 - face_match_result.match_score,
+                    details=face_failure_details,
                 )
             )
         elif face_match_result.match_score < face_match_result.match_threshold:
@@ -380,7 +410,7 @@ async def create_checkin(
                 InitialRiskFactor(
                     RiskSignalType.face_match_low_confidence,
                     RiskSeverity.high,
-                    0.20,
+                    0.25,
                     confidence=1.0 - face_match_result.match_score,
                 )
             )
@@ -390,8 +420,36 @@ async def create_checkin(
         if attendance_session.risk_threshold is not None
         else course.risk_threshold
     )
-    risk_score = initial_risk_score(factors)
-    if outside_geofence and not far_outside_geofence:
+    liveness_score = (
+        liveness_result.liveness_score
+        if liveness_result is not None
+        else (0.0 if attendance_session.require_liveness_check else 1.0)
+    )
+    face_match_score = (
+        face_match_result.match_score
+        if face_match_result is not None
+        else (0.0 if attendance_session.require_face_match else 1.0)
+    )
+    try:
+        biometric_risk = await face_service.assess_biometric_risk(
+            liveness_score=liveness_score,
+            face_match_score=face_match_score,
+        )
+    except FaceServiceRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except FaceServiceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+    # Country and client-address validation above is fail-closed. A request that
+    # reaches aggregation has therefore passed the currently supported network check.
+    network_risk = 0.0
+    risk_score = aggregate_risk_score(
+        biometric_risk=biometric_risk.risk_score,
+        device_attestation_risk=device_attestation_risk,
+        geolocation_risk=geolocation_risk,
+        network_risk=network_risk,
+    )
+    if (outside_geofence and not far_outside_geofence) or reused_device:
         risk_score = max(risk_score, risk_threshold)
     liveness_failed = bool(
         liveness_result is not None and liveness_result.liveness_passed is False
@@ -672,6 +730,62 @@ def list_flagged_checkins(
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.post("/{checkin_id}/review", response_model=CheckInReviewResponse)
+def review_checkin(
+    checkin_id: str,
+    payload: CheckInReviewRequest,
+    request: Request,
+    reviewer: User = Depends(
+        require_roles(UserRole.instructor, UserRole.ta, UserRole.admin)
+    ),
+    db: Session = Depends(get_db),
+) -> CheckInReviewResponse:
+    # The row lock makes the status check and update one operation on PostgreSQL,
+    # preventing two reviewers from deciding the same queue item concurrently.
+    checkin = db.scalar(
+        select(CheckIn)
+        .where(CheckIn.id == checkin_id)
+        .with_for_update()
+    )
+    if checkin is None:
+        raise HTTPException(status_code=404, detail="Check-in not found")
+    if checkin.status not in {CheckInStatus.flagged, CheckInStatus.appealed}:
+        raise HTTPException(
+            status_code=409,
+            detail="Only flagged or appealed check-ins can be reviewed",
+        )
+
+    previous_status = checkin.status
+    reviewed_at = datetime.now(timezone.utc)
+    checkin.status = CheckInStatus(payload.status)
+    checkin.reviewed_by_id = reviewer.id
+    checkin.reviewed_at = reviewed_at
+    checkin.review_notes = payload.review_notes
+    append_audit_log(
+        db,
+        action="checkin_reviewed",
+        request=request,
+        user_id=reviewer.id,
+        resource_type="checkin",
+        resource_id=checkin.id,
+        details={
+            "previous_status": previous_status.value,
+            "decision": checkin.status.value,
+            "student_id": checkin.student_id,
+            "session_id": checkin.session_id,
+        },
+    )
+    db.commit()
+    db.refresh(checkin)
+    return CheckInReviewResponse(
+        id=checkin.id,
+        status=checkin.status,
+        reviewed_by_id=checkin.reviewed_by_id,
+        reviewed_at=checkin.reviewed_at,
+        review_notes=checkin.review_notes,
     )
 
 

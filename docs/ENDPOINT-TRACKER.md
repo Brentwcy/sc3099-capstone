@@ -1,6 +1,8 @@
 # Endpoint Tracker
 
-Statuses reflect the Week 1–5 Maanya scope as of 2026-09-05. Implementation and focused verification are complete; entries remain in review until the required peer review is recorded. Later-week endpoints remain outside this implementation.
+Statuses reflect the completed Week 1–6 scope and initial Week 7 review
+integration as of 2026-09-07. Entries remain in review until the required peer
+review is recorded.
 
 | Area | Method and path | Roles | Request | Success | Errors | Audit event | Owner | Tests | Status |
 |---|---|---|---|---|---|---|---|---|---|
@@ -10,6 +12,7 @@ Statuses reflect the Week 1–5 Maanya scope as of 2026-09-05. Implementation an
 | Auth | `POST /api/v1/auth/logout` | Authenticated | Bearer token | `200` message | `401`, `403` | `logout` | Maanya | `test_audit_events_are_recorded_and_admin_only` | Review |
 | Users | `GET /api/v1/users/me` | Authenticated | Bearer token | `200` profile and consent state | `401`, `403` | N/A | Maanya | `test_registration_profile_and_consent_flow`, public user/privacy tests | Review |
 | Users | `PUT /api/v1/users/me` | Authenticated | Name and/or consent booleans | `200` updated profile | `401`, `403`, `422` | `user_updated` | Maanya | `test_registration_profile_and_consent_flow`, `test_duplicate_email_and_markup_are_rejected` | Review |
+| Users | `POST /api/v1/users/me/face-enrollment` | Authenticated with camera consent | Base64 PNG/JPEG image | `200` profile with `face_enrolled=true`; only a validated hash is persisted | `400`, `401`, `422`, `503` | `face_enrolled` | Maanya | enrollment contract/hash/privacy tests | Review |
 | Users | `GET /api/v1/users/` | Admin | Filters, limit, offset | `200` paginated users | `401`, `403`, `422` | N/A | Maanya | Focused admin tests | Review |
 | Users | `GET /api/v1/users/{user_id}` | Admin in Week 2 | User ID | `200` user | `401`, `403`, `404` | N/A | Maanya | Focused admin tests | Review |
 | Users | `PATCH /api/v1/users/{user_id}` | Admin | Role and/or active state | `200` updated user | `401`, `403`, `404`, `422` | `user_updated` | Maanya | Focused admin tests | Review |
@@ -38,6 +41,7 @@ Statuses reflect the Week 1–5 Maanya scope as of 2026-09-05. Implementation an
 | Check-ins | `GET /api/v1/checkins/` | Instructor, admin | Session/course/student/status/risk/date filters and paging | `200` privacy-safe paginated check-ins | `401`, `403`, `422`, `429` | N/A | Maanya | `test_session_and_detail_queries_enforce_role_access` | Review |
 | Check-ins | `GET /api/v1/checkins/my-checkins` | Student | Optional course and limit filters | `200` own check-in history | `401`, `403`, `422`, `429` | N/A | Maanya | `test_student_can_list_and_filter_own_checkins`, `test_my_checkins_requires_a_student_account` | Review |
 | Check-ins | `GET /api/v1/checkins/flagged` | Instructor, TA, admin | Actionable `flagged`/`appealed` queue; course/session filters and paging | `200` paginated review context | `401`, `403`, `422`, `429` | N/A | Maanya | `test_flagged_review_queue_is_paginated_role_scoped_and_actionable` | Review |
+| Check-ins | `POST /api/v1/checkins/{checkin_id}/review` | Instructor, TA, admin | Final `approved`/`rejected` decision and required review notes | `200` decision with reviewer metadata | `401`, `403`, `404`, `409`, `422`, `429` | `checkin_reviewed` | Maanya | `test_week7_review.py`; Module 4 review client/page tests | Review |
 | Check-ins | `GET /api/v1/checkins/session/{session_id}` | TA, instructor, admin | Session ID | `200` session check-in list | `401`, `403`, `404`, `429` | N/A | Maanya | `test_session_and_detail_queries_enforce_role_access` | Review |
 | Check-ins | `GET /api/v1/checkins/{checkin_id}` | Owner student, TA, instructor, admin | Check-in ID | `200` full privacy-safe detail | `401`, `403`, `404`, `429` | N/A | Maanya | `test_session_and_detail_queries_enforce_role_access` | Review |
 | Devices | `POST /api/v1/devices/register` | Authenticated | Fingerprint, name/platform metadata, public key | `201` untrusted device binding | `400`, `401`, `409`, `422`, `429` | `device_registered` or `security_violation` | Maanya | `test_device_registration_and_owner_listing`, reuse tests | Review |
@@ -58,6 +62,10 @@ Notes:
 - Courses and sessions have no instructor ownership fields. Instructor authorization is role-based; student session access remains enrollment-based.
 - TAs receive the documented roster read permission only; all enrollment writes remain restricted to instructors and admins.
 - Device deletion is a soft revocation so prior check-ins and security history retain their binding. A fingerprint bound to another account is blocked at registration and becomes a high-risk `pattern_anomaly` plus `security_violation` if submitted during check-in.
-- The Module 3 client supports reusable mock and HTTP modes. `docs/M2-M3-CONTRACT.md` is a candidate freeze until the Module 3 owner reviews it; real-service activation remains Week 6 work.
+- The Module 3 client supports reusable mock and HTTP modes. Hash validation,
+  input bounds, privacy tests, Docker readiness, and no/multiple-face handling
+  are implemented. Module 2's 50/20/15/15 final aggregation is implemented;
+  deployment of Module 3's agreed 50/50 biometric-only result, hash aliases, and
+  protected-template lifetime await the Module 3 owner before contract freeze.
 - Check-in attempts are committed to the immutable audit trail before business validation. Successful check-in records, risk-signal rows, and outcome/security audit events are committed atomically.
 - Check-in creation rejects non-Singapore GPS coordinates and foreign or unverifiable public client IPs with `403`. It trusts the first `X-Forwarded-For` entry when present and permits non-global/local addresses as on-campus traffic.

@@ -254,6 +254,58 @@ class Week3ReadAPIContractTests(unittest.TestCase):
         self.assert_get_call(2, "/api/v1/checkins/checkin-1", None)
         self.assert_get_call(3, "/api/v1/checkins/session/session-1", None)
 
+    def test_flagged_queue_and_review_use_exact_contracts(self) -> None:
+        queue = {"items": [], "total": 0, "limit": 25, "offset": 5}
+        reviewed = {
+            "id": "checkin-1",
+            "status": "approved",
+            "reviewed_by_id": "reviewer-1",
+        }
+        fake_requests.queue(
+            FakeResponse(payload=queue),
+            FakeResponse(payload=reviewed),
+        )
+
+        self.assertEqual(
+            self.client.get_flagged_checkins(
+                "access-token",
+                course_id="course-1",
+                session_id=None,
+                limit=25,
+                offset=5,
+            ),
+            queue,
+        )
+        self.assertEqual(
+            self.client.review_checkin(
+                "access-token",
+                "checkin-1",
+                status="approved",
+                review_notes="Evidence checked.",
+            ),
+            reviewed,
+        )
+
+        self.assert_get_call(
+            0,
+            "/api/v1/checkins/flagged",
+            {"course_id": "course-1", "limit": 25, "offset": 5},
+        )
+        review_call = fake_requests.calls[1]
+        self.assertEqual(review_call["method"], "POST")
+        self.assertEqual(
+            review_call["url"],
+            "http://backend.example/api/v1/checkins/checkin-1/review",
+        )
+        self.assertEqual(
+            review_call["json"],
+            {"status": "approved", "review_notes": "Evidence checked."},
+        )
+        self.assertEqual(
+            review_call["headers"],
+            {"Authorization": "Bearer access-token"},
+        )
+
     def test_enrollment_interfaces_preserve_false_and_omit_none(self) -> None:
         fake_requests.queue(
             FakeResponse(payload=[]),

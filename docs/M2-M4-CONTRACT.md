@@ -1,6 +1,8 @@
 # Module 2–Module 4 Contract
 
-This Week 2 contract covers dashboard authentication and connectivity. Operational and analytics endpoints will be added in their scheduled weeks.
+This contract covers dashboard authentication/connectivity and the first real
+Week 7 review integration. Additional operational and analytics endpoints will
+be added in their scheduled weeks.
 
 ## Configuration
 
@@ -40,6 +42,31 @@ These endpoints are available for dashboard integration but are not required for
 - `GET /api/v1/courses/` requires a bearer token and returns a paginated object with `items`, `total`, `limit`, and `offset`.
 - `GET /api/v1/sessions/` requires an instructor or admin bearer token and returns the same pagination envelope.
 - `GET /api/v1/checkins/my-checkins` requires a student bearer token. It accepts optional `course_id` and `limit` query parameters and returns the student's check-in history as a list.
+
+## Flagged Review
+
+`GET /api/v1/checkins/flagged` requires an instructor, TA, or admin bearer token.
+It accepts optional `course_id` and `session_id` filters plus `limit` and
+`offset`, and returns `{items, total, limit, offset}`. Only actionable `flagged`
+and `appealed` check-ins appear. Queue items include course/session/student
+context, risk factors, and appeal/review metadata, but exclude raw coordinates,
+device identifiers, and biometric scores.
+
+`POST /api/v1/checkins/{checkin_id}/review` requires the same roles.
+
+```json
+{
+  "status": "approved",
+  "review_notes": "Evidence checked with the teaching team."
+}
+```
+
+`status` must be `approved` or `rejected`; trimmed review notes are required and
+limited to 2,000 characters. Success returns the check-in ID, final status,
+reviewer ID, review timestamp, and notes. Missing records return `404`, invalid
+input returns `422`, and already-decided records return `409`. The state change,
+reviewer metadata, and immutable `checkin_reviewed` audit event are one database
+transaction.
 
 ## Logout
 

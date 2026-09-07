@@ -723,7 +723,7 @@ Appeal a rejected/flagged check-in. **Requires auth (student, must be owner).**
 - Appeal window: 7 days from check-in
 
 #### POST /checkins/{id}/review
-Review a flagged/appealed check-in. **Requires auth (instructor/TA for the session's course).**
+Review a flagged/appealed check-in. **Requires auth (instructor/TA/admin).**
 
 **Request:**
 ```json
@@ -732,6 +732,12 @@ Review a flagged/appealed check-in. **Requires auth (instructor/TA for the sessi
   "review_notes": "GPS issue confirmed via student's explanation and nearby WiFi logs."
 }
 ```
+
+Review notes are required, trimmed, and limited to 2,000 characters. The
+decision and reviewer metadata are committed atomically with an immutable
+`checkin_reviewed` audit event. A check-in can only be reviewed while it is
+`flagged` or `appealed`; a repeated or competing decision returns `409 Conflict`
+and does not overwrite the first review.
 
 **Response:** `200 OK`
 ```json
@@ -1243,13 +1249,13 @@ Enroll a user's face for future verification. This is a one-time registration pe
 ```
 
 **Success Criteria:**
-- Face detected with confidence >= 0.7
+- Exactly one face detected with confidence >= 0.7
 - Quality score >= 0.5
 - Returns SHA-256 hash (64 hex chars) of face template
 - Store `face_template_hash` in `users.face_embedding_hash`
 
 **Error Responses:**
-- `400 Bad Request`: No face detected, invalid image, or `camera_consent` is false
+- `400 Bad Request`: No face, multiple faces, invalid image, or `camera_consent` is false
 - `422 Validation Error`: Missing required fields
 
 **Privacy Requirements:**
@@ -1281,6 +1287,8 @@ Verify that a face image matches a previously enrolled face.
   "match_score": 0.82,
   "match_threshold": 0.70,
   "face_detected": true,
+  "face_count": 1,
+  "failure_reason": null,
   "current_template_hash": "64_char_sha256_hex_string"
 }
 ```
@@ -1289,6 +1297,11 @@ Verify that a face image matches a previously enrolled face.
 - `match_passed = (match_score >= 0.70)`
 - Same person should score >= 0.70
 - Different person should score < 0.70
+- No face returns a `200` semantic failure with `face_detected: false`,
+  `face_count: 0`, and `failure_reason: "no_face"`.
+- Multiple faces return a `200` semantic failure with `face_detected: true`,
+  `face_count >= 2`, and `failure_reason: "multiple_faces"`.
+- Both face-count failures set `match_passed: false` and `match_score: 0.0`.
 
 **Implementation Approaches (choose one):**
 1. **ML-Based**: Use face embeddings (FaceNet, ArcFace) with cosine similarity
@@ -1351,6 +1364,10 @@ Single-image liveness detection distinguishes real faces from:
 
 > **Note:** The `passive` challenge type is recommended for simplicity - it analyzes 3D depth cues from a single image without requiring user interaction.
 
+All liveness modes require exactly one detected face. Multiple faces return a
+`200` semantic failure with a zero score and `failure_reason: "multiple_faces"`
+in `details`.
+
 **Response:** `200 OK`
 ```json
 {
@@ -1385,48 +1402,32 @@ Single-image liveness detection distinguishes real faces from:
 - Synthetic/uniform faces: Should score < 0.5
 
 ### POST /risk/assess
-Comprehensive risk assessment combining multiple signals.
+Biometric-only risk assessment. Module 3 combines face matching and liveness;
+Module 2 separately owns the final contextual aggregation.
 
 **Request:**
 ```json
 {
   "liveness_score": 0.92,
-  "face_match_score": 0.85,
-  "device_signature": "device_hash",
-  "device_public_key": "PEM_key_string",
-  "user_agent": "Mozilla/5.0...",
-  "ip_address": "192.168.1.1",
-  "geolocation": {
-    "latitude": 1.3483,
-    "longitude": 103.6831,
-    "accuracy": 10.0
-  }
+  "face_match_score": 0.85
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `liveness_score` | float | No | 0.0-1.0, from liveness check |
-| `face_match_score` | float | No | 0.0-1.0, from face verification |
-| `device_signature` | string | No | Device attestation signature |
-| `device_public_key` | string | No | PEM-encoded public key |
-| `user_agent` | string | No | Browser/client user agent |
-| `ip_address` | string | No | Client IP address |
-| `geolocation` | object | No | Location with lat, lng, accuracy |
+| `liveness_score` | float | Yes | 0.0-1.0, from liveness check |
+| `face_match_score` | float | Yes | 0.0-1.0, from face verification |
 
 **Response:** `200 OK`
 ```json
 {
-  "risk_score": 0.25,
+  "risk_score": 0.115,
   "risk_level": "LOW",
   "pass_threshold": true,
   "risk_threshold": 0.50,
   "signal_breakdown": {
-    "liveness": 0.08,
-    "face_match": 0.04,
-    "device": 0.02,
-    "network": 0.06,
-    "geolocation": 0.05
+    "liveness": 0.04,
+    "face_match": 0.075
   },
   "recommendations": []
 }
@@ -1434,7 +1435,7 @@ Comprehensive risk assessment combining multiple signals.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `risk_score` | float | 0.0-1.0, combined weighted risk |
+| `risk_score` | float | 0.0-1.0, combined biometric risk |
 | `risk_level` | string | LOW, MEDIUM, HIGH, or CRITICAL |
 | `pass_threshold` | boolean | true if risk_score < risk_threshold |
 | `risk_threshold` | float | Threshold used (default 0.50) |
@@ -1447,21 +1448,27 @@ Comprehensive risk assessment combining multiple signals.
 - `HIGH`: 0.5 <= risk_score < 0.7
 - `CRITICAL`: risk_score >= 0.7
 
-**Signal Weights (for combining scores):**
+**Module 3 biometric weights:**
+
 | Signal | Weight | Notes |
 |--------|--------|-------|
-| Liveness | 25% | Invert: risk = 1 - liveness_score |
-| Face Match | 25% | Invert: risk = 1 - face_match_score |
-| Device | 20% | Check signature validity |
-| Network | 15% | Detect VPN/proxy |
-| Geolocation | 15% | Check accuracy and validity |
+| Liveness | 50% | Invert: risk = 1 - liveness_score |
+| Face Match | 50% | Invert: risk = 1 - face_match_score |
+
+**Module 2 final check-in weights:**
+
+| Signal | Weight |
+|--------|-------:|
+| Module 3 biometric result | 50% |
+| Device attestation | 20% |
+| Geolocation / geofence validation | 15% |
+| Network / anti-proxy | 15% |
 
 **Recommendations Logic:**
-Generate recommendations for any signal that contributes high risk:
+Generate recommendations for either biometric signal when it contributes high risk:
+
 - Low liveness: "Improve lighting and face visibility"
 - Low face match: "Re-enroll face or improve image quality"
-- VPN detected: "Disable VPN for check-in"
-- Bad geolocation: "Enable precise location services"
 
 ---
 
@@ -1493,14 +1500,23 @@ Verify device authenticity. This endpoint is optional and not included in public
 ```
 
 ### GET /health
-Health check endpoint.
+Readiness endpoint. The target response latency is below 100 ms after startup.
+Docker allows 10 seconds for MediaPipe initialization, then probes this endpoint
+every 10 seconds with a 5-second timeout and 3 retries.
 
 **Response:** `200 OK`
 ```json
 {
-  "status": "healthy"
+  "status": "healthy",
+  "service": "SAIV Face Recognition & Risk Service",
+  "version": "1.0.0",
+  "face_engine": "healthy"
 }
 ```
+
+Biometric latency targets are below 800 ms for `/liveness/check` and
+`/face/verify`, and below 1.0 second for `/face/enroll`. The complete Module 2
+check-in workflow target is below 2.0 seconds at p95.
 
 ### GET /
 Root endpoint - lists available API endpoints.
@@ -1516,7 +1532,7 @@ Root endpoint - lists available API endpoints.
     "POST /face/verify - Verify a face against enrolled template",
     "POST /face/match - Legacy face matching",
     "POST /liveness/check - Perform liveness detection (BONUS)",
-    "POST /risk/assess - Multi-signal risk assessment"
+    "POST /risk/assess - Biometric-only risk assessment"
   ]
 }
 ```
@@ -1955,12 +1971,15 @@ async def verify_face(image: str, reference_hash: str) -> dict:
         )
         return response.json()
 
-async def assess_risk(signals: dict) -> dict:
-    """Call face service for risk assessment."""
+async def assess_risk(liveness_score: float, face_match_score: float) -> dict:
+    """Ask the face service for its biometric-only risk result."""
     async with httpx.AsyncClient(timeout=5.0) as client:
         response = await client.post(
             f"{FACE_SERVICE_URL}/risk/assess",
-            json=signals
+            json={
+                "liveness_score": liveness_score,
+                "face_match_score": face_match_score,
+            }
         )
         return response.json()
 ```

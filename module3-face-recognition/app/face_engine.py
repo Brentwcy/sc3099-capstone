@@ -26,6 +26,11 @@ class FaceEngine:
         self.model_path = self._resolve_model_path()
         self.detector = self._init_detector()
 
+    @property
+    def is_ready(self) -> bool:
+        """Return whether the face model initialized and can accept requests."""
+        return self.detector is not None
+
     def _resolve_model_path(self) -> str:
         """Locate or download the face_landmarker.task model file."""
         candidates = [
@@ -55,30 +60,33 @@ class FaceEngine:
             options = vision.FaceLandmarkerOptions(
                 base_options=base_options,
                 min_face_detection_confidence=self.min_detection_confidence,
-                num_faces=1
+                num_faces=5,
             )
             return vision.FaceLandmarker.create_from_options(options)
         except Exception as e:
             logger.error("Failed to create FaceLandmarker", error=str(e))
             return None
 
+    def extract_faces(self, image_rgb: np.ndarray) -> list[list[Any]]:
+        """Return the landmarks for every detected face, up to the configured limit."""
+        if self.detector is None or image_rgb is None:
+            return []
+
+        try:
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
+            result = self.detector.detect(mp_image)
+            return list(result.face_landmarks or [])
+        except Exception as e:
+            logger.debug("FaceLandmarker detection error", error=str(e))
+            return []
+
     def extract_landmarks(self, image_rgb: np.ndarray) -> list[Any] | None:
         """
         Extract 478 3D landmarks from an RGB NumPy array.
         Returns list of landmarks with x, y, z coordinates, or None if no face detected.
         """
-        if self.detector is None or image_rgb is None:
-            return None
-
-        try:
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
-            result = self.detector.detect(mp_image)
-            if not result.face_landmarks or len(result.face_landmarks) == 0:
-                return None
-            return result.face_landmarks[0]
-        except Exception as e:
-            logger.debug("FaceLandmarker detection error", error=str(e))
-            return None
+        faces = self.extract_faces(image_rgb)
+        return faces[0] if faces else None
 
     def calculate_quality_score(self, image_rgb: np.ndarray, landmarks: Any) -> tuple[float, dict[str, Any]]:
         """

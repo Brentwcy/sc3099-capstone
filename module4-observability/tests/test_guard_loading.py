@@ -115,10 +115,8 @@ class PageDispatchGuardTests(unittest.TestCase):
         cases = (
             ("student", "Sessions"),
             ("ta", "Check-ins"),
-            ("ta", "Flagged Review"),
             ("instructor", "Sessions"),
             ("instructor", "Check-ins"),
-            ("instructor", "Flagged Review"),
             ("instructor", "Analytics"),
             ("instructor", "Exports"),
             ("admin", "Audit Logs"),
@@ -141,6 +139,20 @@ class PageDispatchGuardTests(unittest.TestCase):
                 instructor.assert_not_called()
                 admin.assert_not_called()
                 shell.assert_called_once_with(page_name, role)
+
+    def test_flagged_review_dispatches_to_real_page_for_review_roles(self) -> None:
+        for role in ("ta", "instructor"):
+            with self.subTest(role=role):
+                fake_streamlit.session_state.role = role
+                user = {"role": role}
+                with (
+                    patch.object(page_router, "render_flagged_review") as flagged_review,
+                    patch.object(page_router, "render_shell") as shell,
+                ):
+                    page_router.render_page("Flagged Review", user)
+
+                flagged_review.assert_called_once_with(user)
+                shell.assert_not_called()
 
     def test_unknown_role_cannot_render_any_page(self) -> None:
         fake_streamlit.session_state.role = "unknown"

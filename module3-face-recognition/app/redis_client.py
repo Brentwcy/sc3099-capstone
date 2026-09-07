@@ -20,9 +20,9 @@ class EmbeddingCache:
                 import redis
                 self.redis_client = redis.Redis.from_url(redis_url, decode_responses=False)
                 self.redis_client.ping()
-                logger.info("Connected to Redis cache", url=redis_url)
-            except Exception as e:
-                logger.warning("Redis not available, using in-memory cache", error=str(e))
+                logger.info("Connected to Redis cache")
+            except Exception:
+                logger.warning("Redis not available, using in-memory cache")
                 self.redis_client = None
 
     def set_embedding(self, hash_key: str, embedding: np.ndarray, ttl_seconds: int = 86400) -> bool:
@@ -37,8 +37,8 @@ class EmbeddingCache:
         if self.redis_client:
             try:
                 self.redis_client.set(f"face_tpl:{hash_key}", simhash, ex=ttl_seconds)
-            except Exception as e:
-                logger.debug("Redis template set failed, falling back to memory", error=str(e))
+            except Exception:
+                logger.debug("Redis template set failed, falling back to memory")
         return True
 
     def get_template(self, hash_key: str) -> Optional[str]:
@@ -50,8 +50,8 @@ class EmbeddingCache:
                 raw = self.redis_client.get(f"face_tpl:{hash_key}")
                 if raw:
                     return raw.decode() if isinstance(raw, bytes) else str(raw)
-            except Exception as e:
-                logger.debug("Redis template get failed", error=str(e))
+            except Exception:
+                logger.debug("Redis template get failed")
         value = self._memory_cache.get(hash_key)
         return value if isinstance(value, str) else None
 

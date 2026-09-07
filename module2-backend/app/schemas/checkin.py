@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -128,6 +128,27 @@ class PaginatedFlaggedCheckIns(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class CheckInReviewRequest(BaseModel):
+    status: Literal["approved", "rejected"]
+    review_notes: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("review_notes")
+    @classmethod
+    def normalize_review_notes(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Review notes cannot be blank")
+        return value
+
+
+class CheckInReviewResponse(BaseModel):
+    id: str
+    status: CheckInStatus
+    reviewed_by_id: str
+    reviewed_at: datetime
+    review_notes: str
 
 
 class MyCheckInResponse(BaseModel):
