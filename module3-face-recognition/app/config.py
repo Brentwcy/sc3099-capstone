@@ -24,13 +24,17 @@ class Settings(BaseSettings):
     # External Services
     REDIS_URL: Optional[str] = os.getenv("REDIS_URL", "redis://redis:6379")
     OTEL_EXPORTER_OTLP_ENDPOINT: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", None)
-    
+
     # Biometric Thresholds
     FACE_MATCH_THRESHOLD: float = 0.70
     LIVENESS_THRESHOLD: float = 0.60
     RISK_THRESHOLD: float = 0.50
     MIN_DETECTION_CONFIDENCE: float = 0.50
-    
+
+    # Biometric template encryption (AES-256-GCM, 32-byte key, base64-encoded)
+    # Generate with: python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+    TEMPLATE_ENCRYPTION_KEY: Optional[str] = os.getenv("TEMPLATE_ENCRYPTION_KEY", None)
+
     # Logging
     LOG_LEVEL: str = "INFO"
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")

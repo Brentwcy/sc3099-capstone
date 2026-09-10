@@ -1,13 +1,14 @@
 """
-Multi-signal Risk Assessment and Fusion Engine.
-Evaluates biometric, device, network, and geolocation signals.
+Biometric Risk Assessment Engine for Module 3.
+Evaluates biometric signals (liveness score and face matching).
+Environmental and device signals are handled in Module 2.
 """
 from typing import Dict, List
 from .models import RiskAssessRequest, RiskAssessResponse
 
 
 class RiskEngine:
-    """Multi-signal weighted risk evaluation engine."""
+    """Biometric risk evaluation engine focusing on liveness and face matching."""
 
     def __init__(self, risk_threshold: float = 0.50):
         self.risk_threshold = risk_threshold
@@ -74,69 +75,73 @@ class RiskEngine:
         return 0.05 if start <= check_in <= end else 0.90
 
     def assess_risk(self, request: RiskAssessRequest) -> RiskAssessResponse:
-        """Perform weighted multi-signal risk fusion."""
+        """
+        Assess risk based solely on biometric signals (liveness score and face matching).
+        Contextual, environmental, and device signals are handled in Module 2.
+        """
+        liveness_val = request.liveness_score
+        face_match_val = request.face_match_score
+
+        has_liveness = liveness_val is not None
+        has_match = face_match_val is not None
+
         # 1. Biometric Signals (inverted: low score -> high risk)
-        liveness_score = request.liveness_score if request.liveness_score is not None else 0.80
-        face_match_score = request.face_match_score if request.face_match_score is not None else 0.85
+        if has_liveness and has_match:
+            liveness_score = max(0.0, min(1.0, float(liveness_val)))
+            face_match_score = max(0.0, min(1.0, float(face_match_val)))
+            liveness_risk = 1.0 - liveness_score
+            match_risk = 1.0 - face_match_score
+            c_liveness = 0.5 * liveness_risk
+            c_match = 0.5 * match_risk
+            total_risk = c_liveness + c_match
+        elif has_liveness:
+            liveness_score = max(0.0, min(1.0, float(liveness_val)))
+            liveness_risk = 1.0 - liveness_score
+            match_risk = 0.0
+            c_liveness = liveness_risk
+            c_match = 0.0
+            total_risk = liveness_risk
+        elif has_match:
+            face_match_score = max(0.0, min(1.0, float(face_match_val)))
+            liveness_risk = 0.0
+            match_risk = 1.0 - face_match_score
+            c_liveness = 0.0
+            c_match = match_risk
+            total_risk = match_risk
+        else:
+            # Default low baseline when neither score is provided
+            liveness_risk = 0.20
+            match_risk = 0.15
+            c_liveness = 0.5 * liveness_risk
+            c_match = 0.5 * match_risk
+            total_risk = c_liveness + c_match
 
-        liveness_risk = 1.0 - max(0.0, min(1.0, liveness_score))
-        match_risk = 1.0 - max(0.0, min(1.0, face_match_score))
-
-        # 2. Contextual Signals
-        device_risk = self.evaluate_device_risk(request.device_signature, request.device_public_key)
-        network_risk = self.evaluate_network_risk(request.ip_address, request.user_agent)
-        geo_risk = self.evaluate_geolocation_risk(request.geolocation)
-        time_risk = self.evaluate_time_risk(
-            request.check_in_time, request.session_start_time, request.session_end_time
-        )
-
-        # 3. Weighted Fusion, including the session-time signal.
-        c_liveness = 0.22 * liveness_risk
-        c_match = 0.22 * match_risk
-        c_device = 0.18 * device_risk
-        c_network = 0.14 * network_risk
-        c_geo = 0.14 * geo_risk
-        c_time = 0.10 * time_risk
-
-        total_risk = c_liveness + c_match + c_device + c_network + c_geo + c_time
         total_risk = float(round(max(0.0, min(1.0, total_risk)), 4))
 
-        # 4. Risk Level Mapping
+        # 2. Risk Level Mapping
         if total_risk < 0.30:
             risk_level = "LOW"
-        elif total_risk <= 0.60:
+        elif total_risk < 0.50:
             risk_level = "MEDIUM"
-        elif total_risk <= 0.80:
+        elif total_risk < 0.70:
             risk_level = "HIGH"
         else:
             risk_level = "CRITICAL"
 
         pass_threshold = total_risk < self.risk_threshold
 
-        # 5. Signal breakdown
+        # 3. Biometric signal breakdown
         signal_breakdown = {
             "liveness": round(c_liveness, 4),
             "face_match": round(c_match, 4),
-            "device": round(c_device, 4),
-            "network": round(c_network, 4),
-            "geolocation": round(c_geo, 4),
-            "time": round(c_time, 4),
         }
 
-        # 6. Actionable recommendations
+        # 4. Actionable recommendations strictly for biometric signals
         recommendations: List[str] = []
         if liveness_risk > 0.40:
             recommendations.append("Improve lighting and face visibility for liveness verification")
         if match_risk > 0.40:
             recommendations.append("Re-enroll face or improve image capture angle")
-        if network_risk > 0.40:
-            recommendations.append("Disable VPN or proxy connections during check-in")
-        if geo_risk > 0.40:
-            recommendations.append("Enable precise location services")
-        if time_risk > 0.40:
-            recommendations.append("Check in during the scheduled session window")
-        if device_risk > 0.40:
-            recommendations.append("Register device binding keypair")
 
         return RiskAssessResponse(
             risk_score=total_risk,
