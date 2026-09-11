@@ -51,7 +51,10 @@ app.add_middleware(
 face_engine = FaceEngine(min_detection_confidence=settings.MIN_DETECTION_CONFIDENCE)
 liveness_engine = LivenessEngine(liveness_threshold=settings.LIVENESS_THRESHOLD)
 risk_engine = RiskEngine(risk_threshold=settings.RISK_THRESHOLD)
-cache = EmbeddingCache(redis_url=settings.REDIS_URL)
+cache = EmbeddingCache(
+    redis_url=settings.REDIS_URL,
+    encryption_key=settings.TEMPLATE_ENCRYPTION_KEY,
+)
 
 # Setup OpenTelemetry instrumentation if configured
 setup_telemetry(app, settings.OTEL_EXPORTER_OTLP_ENDPOINT)
@@ -216,24 +219,34 @@ async def verify_face(request: FaceVerifyRequest):
     current_simhash = face_engine.generate_simhash(current_embedding)
     cache.set_template(current_hash, current_simhash)
 
-    if ref_hash and current_hash == ref_hash:
+    if not ref_hash:
+        return FaceVerifyResponse(
+            match_passed=False,
+            match_score=0.0,
+            match_threshold=settings.FACE_MATCH_THRESHOLD,
+            face_detected=True,
+            current_template_hash=current_hash,
+            face_embedding_hash=current_hash
+        )
+
+    reference_simhash = cache.get_template(ref_hash)
+    if reference_simhash is None:
+        logger.warning("Reference face template not found in cache", ref_hash=ref_hash[:8] + "...")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Template unavailable. Re-enrollment required."
+        )
+
+    if current_hash == ref_hash:
         match_score = 1.0
         match_passed = True
-    elif ref_hash:
-        reference_simhash = cache.get_template(ref_hash)
-        if reference_simhash is not None:
-            match_score = face_engine.simhash_similarity(current_simhash, reference_simhash)
-            match_passed = face_engine.simhash_matches(
-                current_simhash,
-                reference_simhash,
-                max_distance=face_engine.SIMHASH_HAMMING_THRESHOLD,
-            )
-        else:
-            match_score = 0.35  # Hash mismatch fallback
-            match_passed = False
     else:
-        match_score = 0.0
-        match_passed = False
+        match_score = face_engine.simhash_similarity(current_simhash, reference_simhash)
+        match_passed = face_engine.simhash_matches(
+            current_simhash,
+            reference_simhash,
+            max_distance=face_engine.SIMHASH_HAMMING_THRESHOLD,
+        )
 
     return FaceVerifyResponse(
         match_passed=match_passed,
@@ -350,7 +363,8 @@ async def check_liveness(request: LivenessRequest):
 
     embedding = face_engine.extract_embedding(landmarks)
     face_hash = face_engine.generate_face_hash(embedding)
-    cache.set_template(face_hash, face_engine.generate_simhash(embedding))
+    # NOTE: Liveness is an anti-spoofing check, not an enrollment event.
+    # We derive the hash for response metadata only; no template is stored here.
 
     return LivenessResponse(
         liveness_passed=liveness_passed,
@@ -363,12 +377,39 @@ async def check_liveness(request: LivenessRequest):
 
 
 # =============================================================================
-# MULTI-SIGNAL RISK ASSESSMENT ENDPOINT
+# FACE ENROLLMENT REVOCATION ENDPOINT
+# =============================================================================
+
+@app.delete("/face/enroll/{template_hash}", status_code=status.HTTP_200_OK)
+async def revoke_face_enrollment(template_hash: str):
+    """
+    Revoke a face enrollment and permanently delete the stored biometric template.
+
+    Called when:
+    - A student withdraws camera/biometric consent
+    - An admin unenrolls a student
+    - A data deletion request is received (PDPA/GDPR right to erasure)
+    """
+    deleted = cache.delete_template(template_hash)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No biometric template found for that hash."
+        )
+    logger.info(
+        "Face enrollment revoked",
+        hash_prefix=template_hash[:8] + "...",
+    )
+    return {"revoked": True, "hash_prefix": template_hash[:8] + "..."}
+
+
+# =============================================================================
+# BIOMETRIC RISK ASSESSMENT ENDPOINT
 # =============================================================================
 
 @app.post("/risk/assess", response_model=RiskAssessResponse, status_code=status.HTTP_200_OK)
 async def assess_risk(request: RiskAssessRequest):
     """
-    Perform multi-signal weighted fraud and risk assessment.
+    Perform biometric risk assessment based on liveness and face matching signals.
     """
     return risk_engine.assess_risk(request)

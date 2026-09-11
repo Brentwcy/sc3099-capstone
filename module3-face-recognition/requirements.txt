@@ -6,6 +6,7 @@ python-multipart==0.0.6
 structlog>=24.1.0
 redis==5.0.1
 httpx==0.26.0
+cryptography>=42.0.0
 
 # Face recognition & CV
 mediapipe==0.10.18
