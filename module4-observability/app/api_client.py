@@ -197,6 +197,27 @@ class APIClient:
             raise_for_status=raise_for_status,
         )
 
+    def delete(
+        self,
+        path: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        timeout: RequestTimeout | None = None,
+        headers: Mapping[str, str] | None = None,
+        access_token: str | None = None,
+        raise_for_status: bool = True,
+    ) -> requests.Response:
+        """Send a DELETE request to the backend."""
+        return self._request(
+            "DELETE",
+            path,
+            params=params,
+            timeout=timeout,
+            headers=headers,
+            access_token=access_token,
+            raise_for_status=raise_for_status,
+        )
+
     def login(self, email: str, password: str) -> dict[str, Any]:
         """Authenticate with Module 2 and return its token-and-user response."""
         response = self.post(
@@ -304,6 +325,40 @@ class APIClient:
             access_token=access_token,
         )
         return self._response_object(response)
+
+    def create_session(
+        self,
+        access_token: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Create a session and return the backend response."""
+        response = self.post(
+            "/api/v1/sessions/",
+            json=payload,
+            access_token=access_token,
+        )
+        return self._response_object(response)
+
+    def update_session(
+        self,
+        access_token: str,
+        session_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Partially update a session and return the backend response."""
+        response = self.patch(
+            f"/api/v1/sessions/{session_id}",
+            json=payload,
+            access_token=access_token,
+        )
+        return self._response_object(response)
+
+    def delete_session(self, access_token: str, session_id: str) -> None:
+        """Delete a scheduled session."""
+        self.delete(
+            f"/api/v1/sessions/{session_id}",
+            access_token=access_token,
+        )
 
     def get_my_checkins(
         self,
