@@ -1,4 +1,4 @@
-"""TA session review backed by backend-authorized session check-ins."""
+"""TA session discovery and review backed by backend-authorized data."""
 
 from typing import Any
 
@@ -9,37 +9,19 @@ from api_client import APIClient, APIClientError
 from components.auth import authenticated_request
 from components.charts import render_bar_chart
 from components.feedback import render_api_error, render_empty_state
-from components.filters import FilterOption, render_session_filter, render_status_filter
+from components.filters import render_status_filter
 from components.kpi import render_kpi
 from components.loading import loading_state
 from components.tables import render_table
+from pages.sessions import render_session_discovery
 from utils.dataframes import (
     convert_datetime_columns,
     filter_equals,
     records_to_dataframe,
     sort_dataframe,
 )
-from utils.mock_data import MOCK_SESSIONS
 
 
-SESSION_COLUMNS = [
-    "scheduled_start",
-    "course_code",
-    "course_name",
-    "name",
-    "session_type",
-    "status",
-    "venue_name",
-]
-SESSION_COLUMN_CONFIG = {
-    "scheduled_start": "Scheduled start",
-    "course_code": "Course code",
-    "course_name": "Course",
-    "name": "Session",
-    "session_type": "Session type",
-    "status": "Status",
-    "venue_name": "Venue",
-}
 CHECKIN_COLUMNS = [
     "checked_in_at",
     "student_name",
@@ -59,31 +41,6 @@ CHECKIN_COLUMN_CONFIG = {
     "liveness_passed": "Liveness passed",
 }
 ATTENTION_STATUSES = frozenset({"flagged", "rejected"})
-TA_SESSION_SOURCE_MESSAGE = (
-    "Development session list — live TA session discovery is not yet available. "
-    "Selecting a session sends a live backend-authorized check-in request."
-)
-
-
-def get_ta_session_options() -> pd.DataFrame:
-    """Return the replaceable development source for TA session discovery."""
-    sessions = records_to_dataframe(MOCK_SESSIONS)
-    sessions = convert_datetime_columns(
-        sessions,
-        ["scheduled_start"],
-        missing="raise",
-    )
-    return sort_dataframe(sessions, "scheduled_start")
-
-
-def _session_options(sessions: pd.DataFrame) -> list[FilterOption]:
-    return [
-        FilterOption(
-            value=row.id,
-            label=f"{row.course_code} — {row.name}",
-        )
-        for row in sessions.itertuples(index=False)
-    ]
 
 
 def _prepare_checkins(records: list[Any]) -> pd.DataFrame:
@@ -117,30 +74,17 @@ def render_ta_sessions(
     current_user: dict[str, Any],
     client: APIClient | None = None,
 ) -> None:
-    """Render the TA's development session selector and authorized records."""
+    """Render the TA's backend-authorized sessions and check-in records."""
     st.title("TA Session Review")
     display_name = current_user.get("full_name") or current_user.get("email") or "TA"
     st.caption(f"Review backend-authorized session check-ins for {display_name}.")
 
-    sessions = get_ta_session_options()
-    st.subheader("Relevant sessions")
-    st.caption(TA_SESSION_SOURCE_MESSAGE)
-    render_kpi("Development Sessions", len(sessions))
-    render_table(
-        sessions[SESSION_COLUMNS],
-        column_config=SESSION_COLUMN_CONFIG,
-        empty_message="No development sessions are available.",
-    )
-    selected_session = render_session_filter(
-        _session_options(sessions),
-        label="Session to review",
-        key="ta_session_review",
-    )
+    api_client = client or APIClient()
+    selected_session = render_session_discovery("ta", api_client)
     if selected_session is None:
-        render_empty_state("Select a session to load its authorized check-ins.")
         return
 
-    api_client = client or APIClient()
+    st.subheader("Session check-ins")
     try:
         with loading_state("Loading session check-ins..."):
             records = authenticated_request(

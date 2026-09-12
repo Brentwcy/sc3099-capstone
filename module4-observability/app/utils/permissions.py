@@ -21,6 +21,7 @@ ROLE_PAGE_PERMISSIONS: dict[str, tuple[str, ...]] = {
     ),
     "admin": (
         "Overview",
+        "Sessions",
         "Audit Logs",
         "System Metrics",
     ),

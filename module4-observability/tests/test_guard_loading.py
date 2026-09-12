@@ -116,7 +116,6 @@ class PageDispatchGuardTests(unittest.TestCase):
             ("student", "Sessions"),
             ("ta", "Check-ins"),
             ("ta", "Flagged Review"),
-            ("instructor", "Sessions"),
             ("instructor", "Check-ins"),
             ("instructor", "Flagged Review"),
             ("instructor", "Analytics"),
@@ -132,6 +131,7 @@ class PageDispatchGuardTests(unittest.TestCase):
                     patch.object(page_router, "render_ta_sessions") as ta,
                     patch.object(page_router, "render_instructor_overview") as instructor,
                     patch.object(page_router, "render_admin_overview") as admin,
+                    patch.object(page_router, "render_sessions") as sessions,
                     patch.object(page_router, "render_shell") as shell,
                 ):
                     page_router.render_page(page_name, {"role": role})
@@ -140,7 +140,22 @@ class PageDispatchGuardTests(unittest.TestCase):
                 ta.assert_not_called()
                 instructor.assert_not_called()
                 admin.assert_not_called()
+                sessions.assert_not_called()
                 shell.assert_called_once_with(page_name, role)
+
+    def test_instructor_and_admin_sessions_use_the_management_page(self) -> None:
+        for role in ("instructor", "admin"):
+            with self.subTest(role=role):
+                fake_streamlit.session_state.role = role
+                user = {"role": role}
+                with (
+                    patch.object(page_router, "render_sessions") as sessions,
+                    patch.object(page_router, "render_shell") as shell,
+                ):
+                    page_router.render_page("Sessions", user)
+
+                sessions.assert_called_once_with(user)
+                shell.assert_not_called()
 
     def test_unknown_role_cannot_render_any_page(self) -> None:
         fake_streamlit.session_state.role = "unknown"

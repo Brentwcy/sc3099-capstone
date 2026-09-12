@@ -101,7 +101,7 @@ class TASessionPageTests(unittest.TestCase):
     def setUp(self) -> None:
         fake_streamlit.reset()
         set_authenticated("ta")
-        self.session_id = ta_sessions.MOCK_SESSIONS[0]["id"]
+        self.session_id = "session-1"
 
     def test_authorized_records_drive_loading_summary_attention_and_safe_tables(self) -> None:
         records = authorized_checkins()
@@ -115,7 +115,7 @@ class TASessionPageTests(unittest.TestCase):
             loading_events.append("exit")
 
         with (
-            patch.object(ta_sessions.st, "caption", create=True) as caption,
+            patch.object(ta_sessions.st, "caption", create=True),
             patch.object(
                 ta_sessions.st,
                 "columns",
@@ -123,6 +123,11 @@ class TASessionPageTests(unittest.TestCase):
                 create=True,
             ),
             patch.object(ta_sessions.st, "button", create=True) as button,
+            patch.object(
+                ta_sessions,
+                "render_session_discovery",
+                return_value=self.session_id,
+            ) as session_discovery,
             patch.object(
                 ta_sessions,
                 "loading_state",
@@ -150,11 +155,6 @@ class TASessionPageTests(unittest.TestCase):
             ) as sort_dataframe,
             patch.object(
                 ta_sessions,
-                "render_session_filter",
-                return_value=self.session_id,
-            ) as session_filter,
-            patch.object(
-                ta_sessions,
                 "render_status_filter",
                 return_value=None,
             ),
@@ -168,36 +168,34 @@ class TASessionPageTests(unittest.TestCase):
             )
 
         authenticated.assert_called_once()
+        session_discovery.assert_called_once_with("ta", client)
         self.assertIs(authenticated.call_args.args[0], client)
         self.assertEqual(client.session_calls, [("access-old", self.session_id)])
         self.assertEqual(loading_events, ["enter:Loading session check-ins...", "exit"])
-        self.assertEqual(to_dataframe.call_count, 2)
-        self.assertEqual(to_dataframe.call_args_list[1], call(records))
-        self.assertEqual(convert_datetimes.call_count, 2)
+        self.assertEqual(to_dataframe.call_count, 1)
+        self.assertEqual(to_dataframe.call_args_list[0], call(records))
+        self.assertEqual(convert_datetimes.call_count, 1)
         self.assertEqual(
-            convert_datetimes.call_args_list[1].args[1],
+            convert_datetimes.call_args_list[0].args[1],
             ["checked_in_at"],
         )
-        self.assertEqual(sort_dataframe.call_count, 2)
-        self.assertEqual(sort_dataframe.call_args_list[1].args[1], "checked_in_at")
-        self.assertFalse(sort_dataframe.call_args_list[1].kwargs["ascending"])
+        self.assertEqual(sort_dataframe.call_count, 1)
+        self.assertEqual(sort_dataframe.call_args_list[0].args[1], "checked_in_at")
+        self.assertFalse(sort_dataframe.call_args_list[0].kwargs["ascending"])
 
         self.assertEqual(
             kpi.call_args_list,
             [
-                call("Development Sessions", len(ta_sessions.MOCK_SESSIONS)),
                 call("Session Check-ins", 4),
                 call("Requiring Attention", 2),
                 call("Approved", 2),
             ],
         )
 
-        self.assertEqual(table.call_count, 4)
-        session_table = table.call_args_list[0].args[0]
-        attention_table = table.call_args_list[1].args[0]
-        recent_table = table.call_args_list[2].args[0]
-        detail_table = table.call_args_list[3].args[0]
-        self.assertEqual(list(session_table.columns), ta_sessions.SESSION_COLUMNS)
+        self.assertEqual(table.call_count, 3)
+        attention_table = table.call_args_list[0].args[0]
+        recent_table = table.call_args_list[1].args[0]
+        detail_table = table.call_args_list[2].args[0]
         self.assertEqual(
             set(attention_table["status"]),
             ta_sessions.ATTENTION_STATUSES,
@@ -223,14 +221,6 @@ class TASessionPageTests(unittest.TestCase):
         )
         self.assertEqual(bar_chart.call_args.kwargs["x"], "status")
         self.assertEqual(bar_chart.call_args.kwargs["y"], "checkin_count")
-        session_options = session_filter.call_args.args[0]
-        self.assertEqual(len(session_options), len(ta_sessions.MOCK_SESSIONS))
-        self.assertTrue(
-            any(
-                "live TA session discovery is not yet available" in item.args[0]
-                for item in caption.call_args_list
-            )
-        )
         button.assert_not_called()
         self.assertEqual(client.general_checkin_calls, 0)
         self.assertEqual(client.flagged_calls, 0)
@@ -249,7 +239,7 @@ class TASessionPageTests(unittest.TestCase):
             patch.object(ta_sessions, "loading_state", return_value=nullcontext()),
             patch.object(
                 ta_sessions,
-                "render_session_filter",
+                "render_session_discovery",
                 return_value=self.session_id,
             ),
             patch.object(
@@ -272,7 +262,7 @@ class TASessionPageTests(unittest.TestCase):
             )
 
         filter_equals.assert_called_once()
-        filtered = table.call_args_list[3].args[0]
+        filtered = table.call_args_list[2].args[0]
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered.iloc[0]["status"], "flagged")
 
@@ -284,7 +274,7 @@ class TASessionPageTests(unittest.TestCase):
             patch.object(ta_sessions, "loading_state", return_value=nullcontext()),
             patch.object(
                 ta_sessions,
-                "render_session_filter",
+                "render_session_discovery",
                 return_value=self.session_id,
             ),
             patch.object(ta_sessions, "render_kpi"),
@@ -300,7 +290,7 @@ class TASessionPageTests(unittest.TestCase):
         empty_state.assert_called_once_with(
             "No check-ins were returned for this session."
         )
-        self.assertEqual(table.call_count, 1)
+        table.assert_not_called()
         bar_chart.assert_not_called()
 
     def test_api_failure_uses_feedback_without_mock_checkin_fallback(self) -> None:
@@ -312,7 +302,7 @@ class TASessionPageTests(unittest.TestCase):
             patch.object(ta_sessions, "loading_state", return_value=nullcontext()),
             patch.object(
                 ta_sessions,
-                "render_session_filter",
+                "render_session_discovery",
                 return_value=self.session_id,
             ),
             patch.object(ta_sessions, "render_kpi"),
@@ -325,7 +315,7 @@ class TASessionPageTests(unittest.TestCase):
             )
 
         api_error.assert_called_once_with(failure)
-        self.assertEqual(table.call_count, 1)
+        table.assert_not_called()
         self.assertEqual(client.general_checkin_calls, 0)
         self.assertEqual(client.flagged_calls, 0)
 

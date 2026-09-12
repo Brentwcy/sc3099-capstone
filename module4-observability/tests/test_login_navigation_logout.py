@@ -189,7 +189,7 @@ class RBACNavigationTests(unittest.TestCase):
                     "Analytics",
                     "Exports",
                 ),
-                "admin": ("Overview", "Audit Logs", "System Metrics"),
+                "admin": ("Overview", "Sessions", "Audit Logs", "System Metrics"),
             },
         )
 
