@@ -1,5 +1,6 @@
 """Role-aware session discovery and authoritative session details."""
 
+from collections.abc import Callable
 from datetime import date, datetime, time, timezone
 from typing import Any
 
@@ -17,6 +18,7 @@ from components.filters import (
 )
 from components.loading import loading_state
 from components.tables import render_table
+from pages.session_forms import render_create_session_form, render_edit_session_form
 from utils.dataframes import (
     convert_datetime_columns,
     records_to_dataframe,
@@ -219,7 +221,12 @@ def _prepare_session_detail(detail: dict[str, Any]) -> pd.DataFrame:
     )
 
 
-def render_session_discovery(role: str, client: APIClient) -> str | None:
+def render_session_discovery(
+    role: str,
+    client: APIClient,
+    *,
+    detail_renderer: Callable[[dict[str, Any]], Any] | None = None,
+) -> str | None:
     """Render role-safe discovery, selection, and authoritative detail."""
     st.subheader("Discover sessions")
     selected_status = render_status_filter(
@@ -298,6 +305,8 @@ def render_session_discovery(role: str, client: APIClient) -> str | None:
         detail_table,
         column_config={"Field": "Field", "Value": "Value"},
     )
+    if detail_renderer is not None:
+        detail_renderer(detail)
     return selected_session
 
 
@@ -314,4 +323,17 @@ def render_sessions(
         or role.title()
     )
     st.caption(f"Browse backend-authorized sessions for {display_name}. Dates use UTC.")
-    render_session_discovery(role, client or APIClient())
+    api_client = client or APIClient()
+    if role == "instructor" and render_create_session_form(api_client):
+        return
+    detail_renderer = None
+    if role == "instructor":
+        detail_renderer = lambda detail: render_edit_session_form(
+            api_client,
+            detail,
+        )
+    render_session_discovery(
+        role,
+        api_client,
+        detail_renderer=detail_renderer,
+    )

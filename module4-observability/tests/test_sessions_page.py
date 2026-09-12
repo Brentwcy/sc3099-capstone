@@ -6,12 +6,12 @@ import unittest
 from contextlib import ExitStack, nullcontext
 from datetime import date
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from tests.fakes import fake_streamlit, set_authenticated
 
 from api_client import APIResponseError  # noqa: E402
-from pages import sessions  # noqa: E402
+from pages import session_forms, sessions  # noqa: E402
 
 
 def confirmed_session(
@@ -213,6 +213,23 @@ class SessionDiscoveryPageTests(unittest.TestCase):
         self.assertEqual(detail_values["Face match required"], "No")
         empty_state.assert_not_called()
 
+    def test_authoritative_detail_is_passed_to_optional_renderer(self) -> None:
+        record = confirmed_session()
+        client = SessionClient([record], detail=record)
+        with ExitStack() as stack:
+            for page_patch in self._page_patches():
+                stack.enter_context(page_patch)
+            stack.enter_context(patch.object(sessions, "render_table"))
+            detail_renderer = MagicMock()
+            selected = sessions.render_session_discovery(
+                "instructor",
+                client,
+                detail_renderer=detail_renderer,
+            )
+
+        self.assertEqual(selected, "session-1")
+        detail_renderer.assert_called_once_with(record)
+
     def test_empty_api_result_uses_empty_state_without_detail_request(self) -> None:
         client = SessionClient([])
         with ExitStack() as stack:
@@ -278,17 +295,68 @@ class SessionDiscoveryPageTests(unittest.TestCase):
         empty_state.assert_called_once_with("Select a session to view its details.")
         self.assertEqual(client.detail_calls, [])
 
-    def test_step_two_page_has_no_mutation_controls(self) -> None:
-        source = sessions.__file__
-        with open(source, encoding="utf-8") as page_file:
-            page_source = page_file.read()
+
+class SessionMutationVisibilityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        fake_streamlit.reset()
+
+    def test_instructor_sees_create_and_selected_detail_edit_ui(self) -> None:
+        set_authenticated("instructor")
+        client = SessionClient([])
+        detail = confirmed_session()
+
+        def render_discovery(role, passed_client, *, detail_renderer=None):
+            self.assertEqual(role, "instructor")
+            self.assertIs(passed_client, client)
+            self.assertIsNotNone(detail_renderer)
+            detail_renderer(detail)
+            return detail["id"]
+
+        with (
+            patch.object(sessions.st, "caption", create=True),
+            patch.object(
+                sessions,
+                "render_create_session_form",
+                return_value=False,
+            ) as create_form,
+            patch.object(
+                sessions,
+                "render_session_discovery",
+                side_effect=render_discovery,
+            ),
+            patch.object(sessions, "render_edit_session_form") as edit_form,
+        ):
+            sessions.render_sessions({"email": "instructor@example.com"}, client)
+
+        create_form.assert_called_once_with(client)
+        edit_form.assert_called_once_with(client, detail)
+
+    def test_admin_has_discovery_but_no_normal_create_or_edit_ui(self) -> None:
+        set_authenticated("admin")
+        client = SessionClient([])
+        with (
+            patch.object(sessions.st, "caption", create=True),
+            patch.object(sessions, "render_create_session_form") as create_form,
+            patch.object(sessions, "render_edit_session_form") as edit_form,
+            patch.object(sessions, "render_session_discovery") as discovery,
+        ):
+            sessions.render_sessions({"email": "admin@example.com"}, client)
+
+        create_form.assert_not_called()
+        edit_form.assert_not_called()
+        discovery.assert_called_once_with("admin", client, detail_renderer=None)
+
+    def test_step_four_page_has_no_lifecycle_or_delete_controls(self) -> None:
+        page_source = ""
+        for source in (sessions.__file__, session_forms.__file__):
+            with open(source, encoding="utf-8") as page_file:
+                page_source += page_file.read()
 
         for fragment in (
-            "create_session(",
-            "update_session(",
             "delete_session(",
-            "st.button(",
-            "st.form(",
+            "Activate session",
+            "Close session",
+            "Cancel session",
         ):
             with self.subTest(fragment=fragment):
                 self.assertNotIn(fragment, page_source)
