@@ -18,6 +18,7 @@ from components.filters import (
 )
 from components.loading import loading_state
 from components.tables import render_table
+from pages.session_actions import render_session_actions
 from pages.session_forms import render_create_session_form, render_edit_session_form
 from utils.dataframes import (
     convert_datetime_columns,
@@ -328,10 +329,12 @@ def render_sessions(
         return
     detail_renderer = None
     if role == "instructor":
-        detail_renderer = lambda detail: render_edit_session_form(
-            api_client,
-            detail,
-        )
+        def render_instructor_detail(detail: dict[str, Any]) -> None:
+            if render_session_actions(api_client, detail):
+                return
+            render_edit_session_form(api_client, detail)
+
+        detail_renderer = render_instructor_detail
     render_session_discovery(
         role,
         api_client,

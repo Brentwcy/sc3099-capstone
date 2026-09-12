@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 from tests.fakes import fake_streamlit, set_authenticated
 
 from api_client import APIResponseError  # noqa: E402
-from pages import session_forms, sessions  # noqa: E402
+from pages import sessions  # noqa: E402
 
 
 def confirmed_session(
@@ -324,11 +324,17 @@ class SessionMutationVisibilityTests(unittest.TestCase):
                 "render_session_discovery",
                 side_effect=render_discovery,
             ),
+            patch.object(
+                sessions,
+                "render_session_actions",
+                return_value=False,
+            ) as session_actions,
             patch.object(sessions, "render_edit_session_form") as edit_form,
         ):
             sessions.render_sessions({"email": "instructor@example.com"}, client)
 
         create_form.assert_called_once_with(client)
+        session_actions.assert_called_once_with(client, detail)
         edit_form.assert_called_once_with(client, detail)
 
     def test_admin_has_discovery_but_no_normal_create_or_edit_ui(self) -> None:
@@ -337,29 +343,16 @@ class SessionMutationVisibilityTests(unittest.TestCase):
         with (
             patch.object(sessions.st, "caption", create=True),
             patch.object(sessions, "render_create_session_form") as create_form,
+            patch.object(sessions, "render_session_actions") as session_actions,
             patch.object(sessions, "render_edit_session_form") as edit_form,
             patch.object(sessions, "render_session_discovery") as discovery,
         ):
             sessions.render_sessions({"email": "admin@example.com"}, client)
 
         create_form.assert_not_called()
+        session_actions.assert_not_called()
         edit_form.assert_not_called()
         discovery.assert_called_once_with("admin", client, detail_renderer=None)
-
-    def test_step_four_page_has_no_lifecycle_or_delete_controls(self) -> None:
-        page_source = ""
-        for source in (sessions.__file__, session_forms.__file__):
-            with open(source, encoding="utf-8") as page_file:
-                page_source += page_file.read()
-
-        for fragment in (
-            "delete_session(",
-            "Activate session",
-            "Close session",
-            "Cancel session",
-        ):
-            with self.subTest(fragment=fragment):
-                self.assertNotIn(fragment, page_source)
 
 
 if __name__ == "__main__":
